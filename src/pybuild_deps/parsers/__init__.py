@@ -5,8 +5,9 @@ from configparser import ConfigParser
 
 try:
     import tomllib as toml
-except ImportError:
-    import tomli as toml
+# no cover is needed to deal with demand for 100% coverage
+except ImportError:  # pragma: no cover
+    import tomli as toml  # pragma: no cover
 import re
 
 from .requirements import parse_requirements

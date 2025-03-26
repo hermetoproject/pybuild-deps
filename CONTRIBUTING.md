@@ -65,6 +65,8 @@ $ poetry run pybuild-deps
 
 Run the full test suite:
 
+!! NOTE !! this works only with poetry 1.8.5, 2.1.1 fails with a cryptic issue.
+
 ```console
 $ nox
 ```
