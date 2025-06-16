@@ -255,3 +255,13 @@ def test_compile_consistent_ordering(runner: CliRunner, tmp_path: Path):
     )
     assert result2.exit_code == 0
     assert outfile1.read_text() == outfile2.read_text()
+
+
+def test_compile_package_without_dependencies(runner: CliRunner, tmp_path: Path):
+    """Test compile function with a package that has no dependencies."""
+    chdir(tmp_path)
+    requirements_path: Path = tmp_path / "requirements.txt"
+    requirements_path.write_text("pytz==2024.1")
+    outfile = tmp_path / "outfile"
+    result = runner.invoke(main.cli, args=["compile", "-o", str(outfile)])
+    assert result.exit_code == 0
