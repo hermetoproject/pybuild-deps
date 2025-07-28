@@ -75,7 +75,7 @@ def retrieve_and_save_source_from_url(
         )
 
     pip_session = pip_session or PipSession()
-    pip_downloader = Downloader(pip_session, "")
+    pip_downloader = Downloader(pip_session, "", 3)
 
     with global_tempdir_manager(), TemporaryDirectory() as tmp_dir:
         try:
