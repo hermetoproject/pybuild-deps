@@ -7,6 +7,7 @@ import tarfile
 from pip._internal.network.session import PipSession
 
 from .cache import persistent_cache
+from .exceptions import NoSDistError
 from .logger import log
 from .parsers import parse_pyproject_toml, parse_setup_cfg, parse_setup_py
 from .parsers.setup_py import SetupPyParsingError
@@ -27,7 +28,14 @@ def find_build_dependencies(
         "setup.py": parse_setup_py,
     }
     log.debug(f"retrieving source for package {package_name}=={version}")
-    source_path = get_package_source(package_name, version, pip_session=pip_session)
+    try:
+        source_path = get_package_source(package_name, version, pip_session=pip_session)
+    except NoSDistError:
+        log.warning(
+            f"No source distribution found for {package_name}=={version}, "
+            "skipping (build requirements may be incomplete)"
+        )
+        return []
     build_dependencies = []
     with tarfile.open(fileobj=source_path.open("rb")) as tarball:
         for file_name, parser in file_parser_map.items():

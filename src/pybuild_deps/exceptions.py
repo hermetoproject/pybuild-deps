@@ -11,6 +11,10 @@ class PyBuildDepsError(Exception):
     """Custom exception for pybuild-deps."""
 
 
+class NoSDistError(PyBuildDepsError):
+    """Package doesn't distribute an sdist."""
+
+
 class UnsolvableDependenciesError(PyBuildDepsError):
     """Unsolvable dependencies."""
 

@@ -132,6 +132,14 @@ def test_find_build_deps_error(
 
 
 @pytest.mark.e2e
+def test_find_build_deps_no_sdist(cache: Path, runner: CliRunner):
+    """Test that packages without sdist are skipped gracefully."""
+    assert not cache.exists()
+    result = runner.invoke(main.cli, args=["find-build-deps", "tensorflow", "2.14.0"])
+    assert result.exit_code == 0
+
+
+@pytest.mark.e2e
 def test_compile_greenpath(
     runner: CliRunner, tmp_path: Path, pypi_repo: PyPIRepository
 ):

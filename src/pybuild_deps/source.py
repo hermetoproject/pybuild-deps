@@ -17,7 +17,7 @@ from pip._internal.req.constructors import install_req_from_req_string
 from pip._internal.utils.temp_dir import global_tempdir_manager
 
 from pybuild_deps.constants import CACHE_PATH
-from pybuild_deps.exceptions import PyBuildDepsError
+from pybuild_deps.exceptions import NoSDistError, PyBuildDepsError
 from pybuild_deps.utils import is_supported_requirement
 
 
@@ -104,6 +104,6 @@ def get_source_url_from_pypi(package_name, version):
     for url in response.json()["urls"]:  # pragma: no branch
         if url["python_version"] == "source":
             return url["url"]
-    raise PyBuildDepsError(
+    raise NoSDistError(
         f"PyPI doesn't have the source code for package {package_name}=={version}"
     )
