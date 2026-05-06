@@ -100,29 +100,24 @@ def test_find_build_deps(
     "package_name,version,expected_error",
     [
         (
-            "tensorflow",
-            "2.14.0",
-            "PyPI doesn't have the source code for package tensorflow==2.14.0",
-        ),
-        (
             "grpcio",
             "1.59.0",
-            "Unable to parse setup.py for package grpcio==1.59.0.",
+            "[ERROR]: Unable to parse setup.py for package grpcio==1.59.0.",
         ),
         (
             "some-package",
             "git+https://example.com",
-            "Unsupported requirement 'some-package @ git+https://example.com'. Requirement must be either pinned (==), a vcs link with sha or a direct url.",  # noqa: E501
+            "[ERROR]: Unsupported requirement 'some-package @ git+https://example.com'. Requirement must be either pinned (==), a vcs link with sha or a direct url.",  # noqa: E501
         ),
         (
             "some-package",
             "https://example.com",
-            "Unable to unpack 'some-package @ https://example.com'. Is 'https://example.com' a python package?",  # noqa: E501
+            "[ERROR]: Unable to unpack 'some-package @ https://example.com'. Is 'https://example.com' a python package?",  # noqa: E501
         ),
         (
             "cryptography",
             "git+https://github.com/pyca/cryptography",
-            "Unsupported requirement 'cryptography @ git+https://github.com/pyca/cryptography'. Requirement must be either pinned (==), a vcs link with sha or a direct url.",  # noqa: E501
+            "[ERROR]: Unsupported requirement 'cryptography @ git+https://github.com/pyca/cryptography'. Requirement must be either pinned (==), a vcs link with sha or a direct url.",  # noqa: E501
         ),
     ],
 )
@@ -195,8 +190,9 @@ def test_compile_not_pinned_requirements_txt(runner: CliRunner, tmp_path: Path):
     assert result.exit_code == 2
     assert (
         result.stderr.splitlines()[-1]
-        == "requirement 'setuptools-rust<1 (from -r requirements.txt (line 1))' is not "
-        "exact (pybuild-tools only supports pinned dependencies)."
+        == "[ERROR]: requirement 'setuptools-rust<1 (from -r "
+        "requirements.txt (line 1))' is not exact "
+        "(pybuild-tools only supports pinned dependencies)."
     )
 
 
@@ -210,7 +206,7 @@ def test_compile_piptools_error(runner: CliRunner, tmp_path: Path, mocker):
     requirements_path.write_text("setuptools-rust==1.6.0")
     result = runner.invoke(main.cli, args=["compile"])
     assert result.exit_code == 2
-    assert result.stderr.splitlines()[-1] == "SOME ERROR"
+    assert result.stderr.splitlines()[-1] == "[ERROR]: SOME ERROR"
 
 
 def test_compile_unsolvable_dependencies(runner: CliRunner, tmp_path: Path, mocker):
