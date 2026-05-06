@@ -61,7 +61,7 @@ class Logger:
             return
         elif level <= logging.DEBUG and self.verbosity >= 1:
             kwargs.setdefault("fg", "blue")
-        click.secho(message, *args, **kwargs)
+        click.secho(f"[{logging.getLevelName(level)}]: {message}", **kwargs)
 
     def debug(self, message: str, *args: Any, **kwargs: Any) -> None:
         self.log(logging.DEBUG, message, *args, **kwargs)
