@@ -47,9 +47,9 @@ class Logger:
         if self.as_library:
             _logger.log(level, message, *args, **kwargs)
         else:
-            self._cli_log(level, message, args, kwargs)
+            self._cli_log(level, message, kwargs)
 
-    def _cli_log(self, level, message, args, kwargs):
+    def _cli_log(self, level, message, kwargs):
         kwargs.setdefault("err", True)
         if level >= logging.ERROR:
             kwargs.setdefault("fg", "red")
