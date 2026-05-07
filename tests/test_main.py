@@ -24,12 +24,12 @@ def pypi_repo():
 @pytest.fixture
 def runner() -> CliRunner:
     """Fixture for invoking command-line interfaces."""
-    return CliRunner(mix_stderr=False)
+    return CliRunner()
 
 
 def test_main_succeeds(runner: CliRunner) -> None:
     """It exits with a status code of zero."""
-    result = runner.invoke(main.cli)
+    result = runner.invoke(main.cli, args=["--help"])
     assert result.exit_code == 0
 
 
@@ -112,17 +112,17 @@ def test_find_build_deps(
         (
             "some-package",
             "git+https://example.com",
-            "Unsupported requirement 'some-package@ git+https://example.com'. Requirement must be either pinned (==), a vcs link with sha or a direct url.",  # noqa: E501
+            "Unsupported requirement 'some-package @ git+https://example.com'. Requirement must be either pinned (==), a vcs link with sha or a direct url.",  # noqa: E501
         ),
         (
             "some-package",
             "https://example.com",
-            "Unable to unpack 'some-package@ https://example.com'. Is 'https://example.com' a python package?",  # noqa: E501
+            "Unable to unpack 'some-package @ https://example.com'. Is 'https://example.com' a python package?",  # noqa: E501
         ),
         (
             "cryptography",
             "git+https://github.com/pyca/cryptography",
-            "Unsupported requirement 'cryptography@ git+https://github.com/pyca/cryptography'. Requirement must be either pinned (==), a vcs link with sha or a direct url.",  # noqa: E501
+            "Unsupported requirement 'cryptography @ git+https://github.com/pyca/cryptography'. Requirement must be either pinned (==), a vcs link with sha or a direct url.",  # noqa: E501
         ),
     ],
 )
