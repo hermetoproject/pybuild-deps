@@ -23,7 +23,7 @@ except ImportError:
 
 
 package = "pybuild_deps"
-python_versions = ["3.13", "3.12", "3.11", "3.10", "3.9"]
+python_versions = ["3.13", "3.12", "3.11", "3.10"]
 nox.options.sessions = (
     "pre-commit",
     "tests",

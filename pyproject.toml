@@ -14,7 +14,7 @@ classifiers = ["Development Status :: 3 - Alpha"]
 Changelog = "https://github.com/bruno-fs/pybuild-deps/releases"
 
 [tool.poetry.dependencies]
-python = "^3.8"
+python = "^3.10"
 click = "^8.0.1"
 tomli = { version = "*", python = "<3.11" }
 xdg = "^6.0.0"
