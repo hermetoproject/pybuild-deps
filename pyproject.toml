@@ -19,6 +19,7 @@ click = "^8.0.1"
 tomli = { version = "*", python = "<3.11" }
 xdg = "^6.0.0"
 requests = "^2.32.3"
+packaging = ">=21.0"
 pip-tools = "^7.0.0"
 
 [tool.poetry.group.dev.dependencies]
