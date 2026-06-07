@@ -202,6 +202,46 @@ def test_compile_piptools_error(runner: CliRunner, tmp_path: Path, mocker):
     assert result.stderr.splitlines()[-1] == "[ERROR]: SOME ERROR"
 
 
+@pytest.mark.e2e
+@pytest.mark.parametrize("generate_hashes", [False, True])
+def test_compile_inactive_environment_markers(
+    runner: CliRunner, tmp_path: Path, generate_hashes: bool
+):
+    """Test compile with requirements having inactive environment markers."""
+    output = tmp_path / "requirements-build.txt"
+    requirements_path: Path = tmp_path / "requirements.txt"
+    requirements_path.write_text("pywin32==311 ; sys_platform == 'impossible_platform'")
+    args = ["compile", str(requirements_path), "-o", str(output)]
+    if generate_hashes:
+        args.append("--generate-hashes")
+    result = runner.invoke(main.cli, args=args)
+    assert result.exit_code == 0, result.output
+    content = output.read_text()
+    lines = [line for line in content.splitlines() if line and not line.startswith("#")]
+    assert lines == []
+
+
+@pytest.mark.e2e
+def test_compile_mixed_active_inactive_markers(
+    runner: CliRunner, tmp_path: Path, pypi_repo: PyPIRepository
+):
+    """Test compile with mix of active and inactive markers."""
+    output = tmp_path / "requirements-build.txt"
+    requirements_path: Path = tmp_path / "requirements.txt"
+    requirements_path.write_text(
+        "cryptography==39.0.0 ; python_version >= '3.0'\n"
+        "pywin32==311 ; sys_platform == 'impossible_platform'\n"
+    )
+    result = runner.invoke(
+        main.cli, args=["compile", str(requirements_path), "-o", str(output)]
+    )
+    assert result.exit_code == 0, result.output
+    build_requirements = list(parse_requirements(str(output), pypi_repo.session))
+    names = {r.name for r in build_requirements}
+    assert "setuptools-rust" in names
+    assert "pywin32" not in names
+
+
 def test_compile_unsolvable_dependencies(runner: CliRunner, tmp_path: Path, mocker):
     """Test error handling for exceptions raised by pip-tools."""
     chdir(tmp_path)
