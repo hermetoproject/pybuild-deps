@@ -25,7 +25,11 @@ def parse_requirements(
     constraint: bool = False,
     isolated: bool = False,
 ) -> Generator[InstallRequirement]:
-    """Thin wrapper around pip's `parse_requirements`."""
+    """Thin wrapper around pip's `parse_requirements`.
+
+    Validates all requirements before filtering inactive environment markers.
+    Unlike pip/pip-compile, this catches invalid pinning on all platforms.
+    """
     session = session or PipSession()
     for parsed_req in _parse_requirements(
         filename, session, finder=finder, options=options, constraint=constraint
@@ -36,4 +40,6 @@ def parse_requirements(
                 f"requirement '{ireq}' is not exact "
                 "(pybuild-deps only supports pinned dependencies)."
             )
+        if ireq.markers and not ireq.markers.evaluate():
+            continue
         yield ireq

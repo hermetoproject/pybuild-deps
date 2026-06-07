@@ -45,6 +45,13 @@ def test_dependency_with_complex_setup_py(compiler, caplog):
     assert caplog.messages[-1] == "Unable to parse setup.py for package grpcio==1.59.0."
 
 
+def test_empty_dependencies(compiler):
+    """Test handling empty dependency list (e.g., all markers inactive)."""
+    dependencies = compiler.resolve([])
+    assert dependencies == set()
+    assert compiler.resolver is None
+
+
 @pytest.mark.e2e
 def test_unsolvable_dependencies(compiler):
     """Test trying to solve impossible dependency combinations."""

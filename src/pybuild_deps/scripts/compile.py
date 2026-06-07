@@ -112,7 +112,9 @@ def compile(
     compiler = BuildDependencyCompiler(repository)
     try:
         results = compiler.resolve(dependencies)
-        hashes = compiler.resolver.resolve_hashes(results) if generate_hashes else None
+        hashes = None
+        if generate_hashes and compiler.resolver is not None:
+            hashes = compiler.resolver.resolve_hashes(results)
     except (PipToolsError, PyBuildDepsError) as e:
         log.error(str(e))
         sys.exit(2)
@@ -142,10 +144,15 @@ def compile(
         emit_find_links=True,
         emit_options=True,
     )
+
+    resolver = compiler.resolver
+    unsafe_packages = resolver.unsafe_packages if resolver is not None else set()
+    unsafe_requirements = resolver.unsafe_constraints if resolver is not None else set()
+
     writer.write(
         results=results,
-        unsafe_packages=compiler.resolver.unsafe_packages,
-        unsafe_requirements=compiler.resolver.unsafe_constraints,
+        unsafe_packages=unsafe_packages,
+        unsafe_requirements=unsafe_requirements,
         markers={
             key_from_ireq(ireq): ireq.markers for ireq in dependencies if ireq.markers
         },
