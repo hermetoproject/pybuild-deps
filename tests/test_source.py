@@ -2,9 +2,12 @@
 
 from pathlib import Path
 
+import pytest
+
 from pybuild_deps.source import get_package_source
 
 
+@pytest.mark.e2e
 def test_get_package_source(
     cache: Path,
 ):

@@ -96,6 +96,7 @@ def test_find_build_deps(
     assert result.stdout.splitlines() == expected_deps
 
 
+@pytest.mark.e2e
 @pytest.mark.parametrize(
     "package_name,version,expected_error",
     [
@@ -238,6 +239,7 @@ def test_compile_unsolvable_dependencies(runner: CliRunner, tmp_path: Path, mock
     assert "setuptools<42" in result.stderr
 
 
+@pytest.mark.e2e
 def test_compile_consistent_ordering(runner: CliRunner, tmp_path: Path):
     """Test ensuring ordering is consistent in compile results."""
     chdir(tmp_path)
