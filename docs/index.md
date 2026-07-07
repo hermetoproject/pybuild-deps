@@ -19,5 +19,5 @@ reference
 contributing
 Code of Conduct <codeofconduct>
 License <license>
-Changelog <https://github.com/bruno-fs/pybuild-deps/releases>
+Changelog <https://github.com/hermetoproject/pybuild-deps/releases>
 ```

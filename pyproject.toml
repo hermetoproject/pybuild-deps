@@ -5,13 +5,13 @@ description = "A simple tool for detection of PEP-517 build dependencies."
 authors = ["Bruno Ciconelle <bciconel@redhat.com>"]
 license = "GPL-3.0"
 readme = "README.md"
-homepage = "https://github.com/bruno-fs/pybuild-deps"
-repository = "https://github.com/bruno-fs/pybuild-deps"
+homepage = "https://github.com/hermetoproject/pybuild-deps"
+repository = "https://github.com/hermetoproject/pybuild-deps"
 documentation = "https://pybuild-deps.readthedocs.io"
 classifiers = ["Development Status :: 3 - Alpha"]
 
 [tool.poetry.urls]
-Changelog = "https://github.com/bruno-fs/pybuild-deps/releases"
+Changelog = "https://github.com/hermetoproject/pybuild-deps/releases"
 
 [tool.poetry.dependencies]
 python = "^3.10"
