@@ -18,6 +18,7 @@ def compiler() -> BuildDependencyCompiler:
     return BuildDependencyCompiler(repo)
 
 
+@pytest.mark.e2e
 def test_compile_greenpath(compiler):
     """Test compiling build dependencies happy path."""
     ireq = install_req_from_req_string("cryptography==40.0.0")
@@ -35,6 +36,7 @@ def test_unpinned_dependency(compiler):
         compiler.resolve([ireq])
 
 
+@pytest.mark.e2e
 def test_dependency_with_complex_setup_py(compiler, caplog):
     """Ensure unparseable setup.py won't get in the way."""
     caplog.set_level(logging.ERROR)
@@ -43,6 +45,7 @@ def test_dependency_with_complex_setup_py(compiler, caplog):
     assert caplog.messages[-1] == "Unable to parse setup.py for package grpcio==1.59.0."
 
 
+@pytest.mark.e2e
 def test_unsolvable_dependencies(compiler):
     """Test trying to solve impossible dependency combinations."""
     ireqs = map(install_req_from_req_string, ("setuptools<42", "setuptools>=42"))

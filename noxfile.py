@@ -27,9 +27,11 @@ python_versions = ["3.13", "3.12", "3.11", "3.10"]
 nox.options.sessions = (
     "pre-commit",
     "tests",
+    "e2e-tests",
     "docs-build",
 )
-test_requirements = ["pytest", "pytest-cov", "pytest-mock"]
+nox.options.reuse_venv = "always"
+test_requirements = ["pytest", "pytest-cov", "pytest-mock", "pytest-xdist"]
 
 
 def activate_virtualenv_in_precommit_hooks(session: Session) -> None:
@@ -129,13 +131,26 @@ def precommit(session: Session) -> None:
 
 @session(python=python_versions)
 def tests(session: Session) -> None:
-    """Run the test suite."""
+    """Run unit tests (excludes e2e tests that require network access)."""
     session.install(".")
     session.install(*test_requirements)
-    cmd = "pytest"
+    args = ["-m", "not e2e"]
     if not session.posargs:
-        cmd += " --cov=pybuild_deps --cov-report=term --cov-report=xml --no-cov-on-fail"
-    session.run(*cmd.split(), *session.posargs)
+        args += [
+            "--cov=pybuild_deps",
+            "--cov-report=term",
+            "--cov-report=xml",
+            "--no-cov-on-fail",
+        ]
+    session.run("pytest", *args, *session.posargs)
+
+
+@session(name="e2e-tests", python=python_versions[0])
+def e2e_tests(session: Session) -> None:
+    """Run e2e tests that require network access (single Python version, parallel)."""
+    session.install(".")
+    session.install(*test_requirements)
+    session.run("pytest", "-m", "e2e", "-n", "auto", *session.posargs)
 
 
 @session(name="docs-build", python=python_versions[0])
