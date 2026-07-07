@@ -51,11 +51,17 @@ jobs:
       - name: Tag new version if it doesn't exist
         id: tag-version
         if: steps.check-version.outputs.version
-        uses: bruno-fs/repo-tagger@1.0.0
         env:
-          GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
-        with:
-          tag: "${{ steps.check-version.outputs.version }}"
+          TAG: ${{ steps.check-version.outputs.version }}
+        run: |
+          if git ls-remote --tags origin "refs/tags/${TAG}" | grep -q .; then
+            echo "Tag ${TAG} already exists, skipping."
+          else
+            git tag "${TAG}"
+            git push origin "${TAG}"
+            echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+            echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Bump version for developmental release
         if: "! steps.tag-version.outputs.tag"
