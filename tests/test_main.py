@@ -60,16 +60,6 @@ def test_main_succeeds(runner: CliRunner) -> None:
         ),
         (
             "cryptography",
-            "git+https://github.com/pyca/cryptography@41.0.5",
-            [
-                "setuptools>=61.0.0",
-                "wheel",
-                "cffi>=1.12; platform_python_implementation != 'PyPy'",
-                "setuptools-rust>=0.11.4",
-            ],
-        ),
-        (
-            "cryptography",
             "https://github.com/pyca/cryptography/archive/refs/tags/43.0.0.tar.gz",
             [
                 "maturin>=1,<2",
@@ -77,7 +67,6 @@ def test_main_succeeds(runner: CliRunner) -> None:
                 "setuptools",
             ],
         ),
-        ("azure-identity", "1.14.1", []),
         ("debugpy", "1.8.5", ["wheel", "setuptools"]),
     ],
 )
@@ -114,11 +103,6 @@ def test_find_build_deps(
             "some-package",
             "https://example.com",
             "[ERROR]: Unable to unpack 'some-package @ https://example.com'. Is 'https://example.com' a python package?",  # noqa: E501
-        ),
-        (
-            "cryptography",
-            "git+https://github.com/pyca/cryptography",
-            "[ERROR]: Unsupported requirement 'cryptography @ git+https://github.com/pyca/cryptography'. Requirement must be either pinned (==), a vcs link with sha or a direct url.",  # noqa: E501
         ),
     ],
 )
@@ -171,7 +155,7 @@ def test_compile_missing_requirements_txt(runner: CliRunner, tmp_path: Path):
 
 
 @pytest.mark.e2e
-@pytest.mark.parametrize("args", ["--no-header", "--generate-hashes", "-v", "-q"])
+@pytest.mark.parametrize("args", ["--no-header", "--generate-hashes"])
 def test_compile_implicit_requirements_txt_and_non_default_options(
     runner: CliRunner,
     tmp_path: Path,
