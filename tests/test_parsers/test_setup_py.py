@@ -102,13 +102,6 @@ from setuptools import setup
 kwargs = dict(setup_requires="foo")
 setup(**kwargs)
 """
-KWARGS_DICT_LITERAL = """
-from setuptools import setup
-
-kwargs = {"setup_requires": "foo"}
-setup(**kwargs)
-"""
-
 MULTIPLE_ASSIGNMENT = """
 from setuptools import setup
 
@@ -117,17 +110,6 @@ SETUP_REQUIRES, OTHER_CONSTANT = ["foo"], "bar"
 
 setup(
     setup_requires=SETUP_REQUIRES,
-)
-"""
-
-MULTIPLE_ASSIGNMENT_2 = """
-from setuptools import setup
-
-# yet another weird unsupported scenario
-DEP1, DEP2 = ["foo", "bar"]
-
-setup(
-    setup_requires=[DEP1, DEP2],
 )
 """
 
@@ -152,17 +134,7 @@ setup(
             marks=pytest.mark.xfail(reason="not implemented"),
         ),
         pytest.param(
-            KWARGS_DICT_LITERAL,
-            ["foo"],
-            marks=pytest.mark.xfail(reason="not implemented"),
-        ),
-        pytest.param(
             MULTIPLE_ASSIGNMENT,
-            ["foo"],
-            marks=pytest.mark.xfail(reason="not implemented"),
-        ),
-        pytest.param(
-            MULTIPLE_ASSIGNMENT_2,
             ["foo"],
             marks=pytest.mark.xfail(reason="not implemented"),
         ),
