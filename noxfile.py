@@ -27,10 +27,9 @@ python_versions = ["3.13", "3.12", "3.11", "3.10"]
 nox.options.sessions = (
     "pre-commit",
     "tests",
-    "xdoctest",
     "docs-build",
 )
-test_requirements = ["pytest", "pygments", "pytest-mock"]
+test_requirements = ["pytest", "pytest-cov", "pytest-mock"]
 
 
 def activate_virtualenv_in_precommit_hooks(session: Session) -> None:
@@ -132,40 +131,11 @@ def precommit(session: Session) -> None:
 def tests(session: Session) -> None:
     """Run the test suite."""
     session.install(".")
-    session.install("coverage[toml]", *test_requirements)
-    try:
-        session.run("coverage", "run", "--parallel", "-m", "pytest", *session.posargs)
-    finally:
-        if session.interactive:
-            session.notify("coverage", posargs=[])
-
-
-@session(python=python_versions[0])
-def coverage(session: Session) -> None:
-    """Produce the coverage report."""
-    args = session.posargs or ["report"]
-
-    session.install("coverage[toml]")
-
-    if not session.posargs and any(Path().glob(".coverage.*")):
-        session.run("coverage", "combine")
-
-    session.run("coverage", *args)
-
-
-@session(python=python_versions)
-def xdoctest(session: Session) -> None:
-    """Run examples with xdoctest."""
-    if session.posargs:
-        args = [package, *session.posargs]
-    else:
-        args = [f"--modname={package}", "--command=all"]
-        if "FORCE_COLOR" in os.environ:
-            args.append("--colored=1")
-
-    session.install(".")
-    session.install("xdoctest[colors]")
-    session.run("python", "-m", "xdoctest", *args)
+    session.install(*test_requirements)
+    cmd = "pytest"
+    if not session.posargs:
+        cmd += " --cov=pybuild_deps --cov-report=term --cov-report=xml --no-cov-on-fail"
+    session.run(*cmd.split(), *session.posargs)
 
 
 @session(name="docs-build", python=python_versions[0])
