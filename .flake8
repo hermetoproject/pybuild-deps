@@ -1,6 +1,0 @@
-[flake8]
-select = DAR,RST
-ignore = RST201,RST203,RST301
-docstring-convention = google
-rst-roles = class,const,func,meth,mod,ref
-rst-directives = deprecated
