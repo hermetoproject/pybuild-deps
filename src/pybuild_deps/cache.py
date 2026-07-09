@@ -17,7 +17,6 @@ def persistent_cache(cache_name: str, ignore_kwargs: list | None = None):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            # raise Exception(CACHE_PATH)
             # Create a unique key for the function call based on its arguments
             filtered_kwargs = {
                 k: v for k, v in kwargs.items() if k not in ignore_kwargs
