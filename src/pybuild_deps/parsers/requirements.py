@@ -34,6 +34,6 @@ def parse_requirements(
         if not is_supported_requirement(ireq):
             raise PyBuildDepsError(
                 f"requirement '{ireq}' is not exact "
-                "(pybuild-tools only supports pinned dependencies)."
+                "(pybuild-deps only supports pinned dependencies)."
             )
         yield ireq

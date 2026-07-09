@@ -185,7 +185,7 @@ def test_compile_not_pinned_requirements_txt(runner: CliRunner, tmp_path: Path):
         result.stderr.splitlines()[-1]
         == "[ERROR]: requirement 'setuptools-rust<1 (from -r "
         "requirements.txt (line 1))' is not exact "
-        "(pybuild-tools only supports pinned dependencies)."
+        "(pybuild-deps only supports pinned dependencies)."
     )
 
 
