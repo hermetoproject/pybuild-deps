@@ -27,15 +27,10 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Upgrade pip
-        run: |
-          pip install --constraint="$(pwd)/.github/workflows/constraints.txt" pip
-          pip --version
-
-      - name: Install Poetry
-        run: |
-          pip install --constraint="$(pwd)/.github/workflows/constraints.txt" poetry
-          poetry --version
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.3.2
+        with:
+          version: "0.11.28"
 
       - name: Check if there is a parent commit
         id: check-parent-commit
@@ -46,7 +41,7 @@ jobs:
         id: check-version
         if: steps.check-parent-commit.outputs.sha
         run: |
-          echo "version=$(poetry version -s)" >> $GITHUB_OUTPUT
+          echo "version=$(uv version --short)" >> $GITHUB_OUTPUT
 
       - name: Tag new version if it doesn't exist
         id: tag-version
@@ -66,13 +61,13 @@ jobs:
       - name: Bump version for developmental release
         if: "! steps.tag-version.outputs.tag"
         run: |
-          poetry version patch &&
-          version=$(poetry version -s) &&
-          poetry version $version.dev.$(date +%s)
+          uv version --bump patch --frozen &&
+          version=$(uv version --short) &&
+          uv version "${version}.dev$(date +%s)" --frozen
 
       - name: Build package
         run: |
-          poetry build --ansi
+          uv build
 
       - name: Publish package on PyPI
         if: steps.tag-version.outputs.tag
