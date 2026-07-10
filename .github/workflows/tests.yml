@@ -40,30 +40,13 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
-      - name: Upgrade pip
-        run: |
-          pip install --constraint="$(pwd)/.github/workflows/constraints.txt" pip
-          pip --version
-
-      - name: Upgrade pip in virtual environments
-        shell: python
-        run: |
-          import os
-          import pip
-
-          with open(os.environ["GITHUB_ENV"], mode="a") as io:
-              print(f"VIRTUALENV_PIP={pip.__version__}", file=io)
-
-      - name: Install Poetry
-        run: |
-          pipx install --pip-args=--constraint="$(pwd)/.github/workflows/constraints.txt" poetry
-          poetry --version
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.3.2
+        with:
+          version: "0.11.28"
 
       - name: Install Nox
-        run: |
-          pipx install --pip-args=--constraint="$(pwd)/.github/workflows/constraints.txt" nox
-          pipx inject --pip-args=--constraint="$(pwd)/.github/workflows/constraints.txt" nox nox-poetry
-          nox --version
+        run: uv tool install nox
 
       - name: Compute pre-commit cache key
         if: matrix.session == 'pre-commit'
