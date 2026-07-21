@@ -17,7 +17,6 @@
 [tests]: https://github.com/hermetoproject/pybuild-deps/actions?workflow=Tests
 [codecov]: https://app.codecov.io/gh/hermetoproject/pybuild-deps
 [pre-commit]: https://github.com/pre-commit/pre-commit
-[black]: https://github.com/psf/black
 [ruff badge]: https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json
 [ruff project]: https://github.com/charliermarsh/ruff
 

@@ -23,11 +23,7 @@ packaging = ">=21.0"
 pip-tools = "^7.0.0"
 
 [tool.poetry.group.dev.dependencies]
-black = ">=21"
-darglint = ">=1.8.1"
-flake8 = ">=4.0.1"
 furo = ">=2021.11.12"
-ipykernel = "^6.25.2"
 myst-parser = { version = ">=0.16.1" }
 pre-commit = ">=2.16.0"
 pre-commit-hooks = ">=4.1.0"
