@@ -27,7 +27,6 @@ python_versions = ["3.13", "3.12", "3.11", "3.10"]
 nox.options.sessions = (
     "pre-commit",
     "tests",
-    "e2e-tests",
     "docs-build",
 )
 nox.options.reuse_venv = "always"
