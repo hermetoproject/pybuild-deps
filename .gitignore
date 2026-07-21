@@ -1,12 +1,44 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Unit test / coverage reports
+htmlcov/
+.nox/
+.coverage
+.coverage.*
+coverage.xml
+.cache
+.pytest_cache/
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Type checkers
 .mypy_cache/
-/.coverage
-/.coverage.*
-/.nox/
+.pytype/
+
+# IDE settings
+.vscode/
+.idea/
+
+# Vim temporary files
+*.swp
+*.swo
+
+# Project-specific
 /.python-version
-/.pytype/
 /.tool-versions
-/.vscode/
-/dist/
 /docs/_build/
 /src/*.egg-info/
-__pycache__/
