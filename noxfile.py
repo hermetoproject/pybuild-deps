@@ -2,23 +2,10 @@
 
 import os
 import shutil
-import sys
 from pathlib import Path
-from textwrap import dedent
 
 import nox
-
-
-try:
-    from nox_poetry import Session, session
-except ImportError:
-    message = f"""\
-    Nox failed to import the 'nox-poetry' package.
-
-    Please install it using the following command:
-
-    {sys.executable} -m pip install nox-poetry"""
-    raise SystemExit(dedent(message)) from None
+from nox.sessions import Session
 
 
 package = "pybuild_deps"
@@ -29,11 +16,11 @@ nox.options.sessions = (
     "docs-build",
 )
 nox.options.reuse_venv = "always"
+nox.options.default_venv_backend = "uv"
 test_requirements = ["pytest", "pytest-cov", "pytest-mock", "pytest-xdist"]
 
 
-
-@session(name="pre-commit", python=python_versions[0])
+@nox.session(name="pre-commit", python=python_versions[0])
 def precommit(session: Session) -> None:
     """Lint using pre-commit."""
     args = session.posargs or [
@@ -51,7 +38,7 @@ def precommit(session: Session) -> None:
     session.run("pre-commit", *args)
 
 
-@session(python=python_versions)
+@nox.session(python=python_versions)
 def tests(session: Session) -> None:
     """Run unit tests (excludes e2e tests that require network access)."""
     session.install(".")
@@ -67,7 +54,7 @@ def tests(session: Session) -> None:
     session.run("pytest", *args, *session.posargs)
 
 
-@session(name="e2e-tests", python=python_versions[0])
+@nox.session(name="e2e-tests", python=python_versions[0])
 def e2e_tests(session: Session) -> None:
     """Run e2e tests that require network access (single Python version, parallel)."""
     session.install(".")
@@ -75,7 +62,7 @@ def e2e_tests(session: Session) -> None:
     session.run("pytest", "-m", "e2e", "-n", "auto", *session.posargs)
 
 
-@session(name="docs-build", python=python_versions[0])
+@nox.session(name="docs-build", python=python_versions[0])
 def docs_build(session: Session) -> None:
     """Build the documentation."""
     args = session.posargs or ["docs", "docs/_build"]
@@ -92,7 +79,7 @@ def docs_build(session: Session) -> None:
     session.run("sphinx-build", *args)
 
 
-@session(python=python_versions[0])
+@nox.session(python=python_versions[0])
 def docs(session: Session) -> None:
     """Build and serve the documentation with live reloading on file changes."""
     args = session.posargs or ["--open-browser", "docs", "docs/_build"]
