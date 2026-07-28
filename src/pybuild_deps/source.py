@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import tarfile
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -18,6 +17,7 @@ from pip._internal.utils.temp_dir import global_tempdir_manager
 
 from pybuild_deps.constants import CACHE_PATH
 from pybuild_deps.exceptions import NoSDistError, PyBuildDepsError
+from pybuild_deps.logger import log
 from pybuild_deps.utils import is_supported_requirement
 
 
@@ -41,7 +41,7 @@ def get_package_source(
     tarball_path = cached_path / "source.tar.gz"
     error_path = cached_path / "error.json"
     if tarball_path.exists():
-        logging.info("using cached version for package %s==%s", package_name, version)
+        log.info("using cached version for package %s==%s", package_name, version)
         return tarball_path
 
     elif error_path.exists():
