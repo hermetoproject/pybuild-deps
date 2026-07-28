@@ -155,7 +155,7 @@ class BuildDependencyCompiler:
                 raise UnsolvableDependenciesError(package, err.__cause__.args)  # noqa: B904
             # TODO: We don't know how to reproduce the condition below, or even know if
             # it is possible.
-            raise err  # pragma: no cover
+            raise  # pragma: no cover
         self.resolver.unsafe_packages |= unsafe_packages
         self.resolver.unsafe_constraints |= unsafe_constraints
         return requirements

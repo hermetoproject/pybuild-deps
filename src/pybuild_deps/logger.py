@@ -55,9 +55,9 @@ class Logger:
             kwargs.setdefault("fg", "red")
         elif level >= logging.WARNING:
             kwargs.setdefault("fg", "yellow")
-        elif level >= logging.INFO and self.verbosity < 0:
-            return
-        elif level >= logging.DEBUG and self.verbosity < 1:
+        elif (level >= logging.INFO and self.verbosity < 0) or (
+            level >= logging.DEBUG and self.verbosity < 1
+        ):
             return
         elif level <= logging.DEBUG and self.verbosity >= 1:
             kwargs.setdefault("fg", "blue")
