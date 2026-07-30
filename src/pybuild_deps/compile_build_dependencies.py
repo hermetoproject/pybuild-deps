@@ -170,7 +170,6 @@ class BuildDependencyCompiler:
             ireq.name,
             ireq_version,
             raise_setuppy_parsing_exc=False,
-            pip_session=self.repository.session,
         ):
             # The original 'find_build_dependencies' function is very naive by design.
             # It only returns a simple list of strings representing builds dependencies.
