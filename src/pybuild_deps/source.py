@@ -10,19 +10,14 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from urllib.parse import urlparse
 
+import git
 import requests
-from pip._internal.exceptions import InstallationError
-from pip._internal.network.download import Downloader
-from pip._internal.network.session import PipSession
-from pip._internal.operations.prepare import unpack_url
-from pip._internal.req.constructors import install_req_from_req_string
-from pip._internal.utils.temp_dir import global_tempdir_manager
+from git.exc import GitCommandError
 from urllib3.util.retry import Retry
 
 from pybuild_deps.constants import CACHE_PATH
 from pybuild_deps.exceptions import NoSDistError, PyBuildDepsError
 from pybuild_deps.logger import log
-from pybuild_deps.utils import is_supported_requirement
 
 
 _VCS_SCHEMES = frozenset({"git+https", "git+http", "git+ssh", "git+file", "git"})
@@ -30,7 +25,10 @@ _RETRY = Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 
 
 
 def _is_vcs_scheme(scheme: str) -> bool:
-    """Check whether the URL scheme is a VCS transport."""
+    """Check whether the URL scheme is a supported VCS transport.
+
+    Raises for VCS-like schemes (containing '+') that aren't git.
+    """
     if scheme in _VCS_SCHEMES:
         return True
     if "+" in scheme:
@@ -40,9 +38,7 @@ def _is_vcs_scheme(scheme: str) -> bool:
     return False
 
 
-def get_package_source(
-    package_name: str, version: str, pip_session: PipSession | None = None
-) -> Path:
+def get_package_source(package_name: str, version: str) -> Path:
     """Get source code for a given package."""
     parsed_url = urlparse(version)
     is_url = all((parsed_url.scheme, parsed_url.netloc))
@@ -65,7 +61,6 @@ def get_package_source(
         package_name,
         url,
         tarball_path=tarball_path,
-        pip_session=pip_session,
     )
 
 
@@ -74,7 +69,6 @@ def _retrieve_and_save_source(
     url: str,
     *,
     tarball_path: Path,
-    pip_session: PipSession | None = None,
 ) -> Path:
     """Download or clone package source and repack as package_name.tar.gz.
 
@@ -84,45 +78,75 @@ def _retrieve_and_save_source(
     scheme = urlparse(url).scheme
     is_vcs = _is_vcs_scheme(scheme)
 
+    if is_vcs:
+        _validate_vcs_url(package_name, url)
+
     tarball_path.parent.mkdir(parents=True, exist_ok=True)
 
     with TemporaryDirectory() as tmp_dir:
+        tmp_path = Path(tmp_dir)
         if is_vcs:
-            ireq = install_req_from_req_string(f"{package_name} @ {url}")
-            if not is_supported_requirement(ireq):
-                raise PyBuildDepsError(
-                    f"Unsupported requirement '{ireq.req}'. Requirement must be "
-                    "either pinned (==), a vcs link with sha or a direct url."
-                )
-            pip_session = pip_session or PipSession()
-            pip_downloader = Downloader(pip_session, "")
-            with global_tempdir_manager():
-                try:
-                    unpack_url(
-                        ireq.link,
-                        tmp_dir,
-                        download=pip_downloader,
-                        verbosity=0,
-                    )
-                except InstallationError as err:
-                    raise PyBuildDepsError(
-                        f"Unable to unpack '{ireq.req}'. "
-                        f"Is '{ireq.link}' a python package?"
-                    ) from err
+            _clone_vcs_source(url, tmp_path)
         else:
-            tmp_path = Path(tmp_dir)
             _download_archive(url, package_name, tmp_path)
             _extract_archive(tmp_path, url, package_name)
 
-            if not any(tmp_path.iterdir()):
-                raise NoSDistError(
-                    f"No content extracted from '{package_name} @ {url}'"
-                )
+        if not any(tmp_path.iterdir()):
+            raise NoSDistError(f"No content extracted from '{package_name} @ {url}'")
 
         with tarfile.open(tarball_path, "w:gz") as tarball:
             tarball.add(tmp_dir, arcname=package_name)
 
     return tarball_path
+
+
+def _validate_vcs_url(package_name: str, url: str) -> None:
+    """Check that a VCS URL contains a pinned reference (commit/tag after @).
+
+    Example: git+https://github.com/org/repo.git@v1.0 -> ref is "v1.0"
+    """
+    parsed = urlparse(url)
+    # reject hostnames starting with - to prevent option injection via
+    # git+ssh://-oProxyCommand=evil/repo@ref
+    if parsed.netloc.startswith("-"):
+        raise PyBuildDepsError(f"Invalid hostname in VCS URL: '{parsed.netloc}'")
+    path_parts = parsed.path.split("@", 1)
+    ref = path_parts[1] if len(path_parts) == 2 else ""
+    # reject refs starting with - to prevent git flag injection
+    if not ref or ref.startswith("-"):
+        raise PyBuildDepsError(
+            f"Unsupported requirement '{package_name} @ {url}'. "
+            "Requirement must be either pinned (==), "
+            "a vcs link with sha or a direct url."
+        )
+
+
+def _clone_vcs_source(url: str, dest: Path) -> None:
+    """Clone a VCS repository at the pinned reference."""
+    parsed = urlparse(url)
+    repo_path, ref = parsed.path.split("@", 1)
+    # git+https://host/repo@ref -> https://host/repo
+    clone_url = parsed._replace(
+        scheme=parsed.scheme.split("+", 1)[1],
+        path=repo_path,
+    ).geturl()
+
+    try:
+        repo = git.Repo.clone_from(
+            clone_url,
+            str(dest),
+            no_checkout=True,
+            filter="blob:none",
+            env={"GIT_TERMINAL_PROMPT": "0"},
+        )
+        repo.head.reference = repo.commit(ref)
+        repo.head.reset(index=True, working_tree=True)
+    except GitCommandError as err:
+        raise PyBuildDepsError(
+            f"Failed to clone git repository '{clone_url}' at ref '{ref}'"
+        ) from err
+
+    shutil.rmtree(dest / ".git", ignore_errors=True)
 
 
 def _validate_archive_members(names: list[str], url: str) -> None:

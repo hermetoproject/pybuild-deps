@@ -11,6 +11,7 @@ from pybuild_deps.source import (
     _extract_archive,
     _unwrap_root_dir,
     _validate_archive_members,
+    _validate_vcs_url,
     get_package_source,
 )
 
@@ -29,6 +30,51 @@ def test_get_package_source(
     # invoke it again to test the path for a cached result
     source_tarball_cached = get_package_source("cryptography", "40")
     assert source_tarball_cached.stat().st_mtime == last_modified_at
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        pytest.param(
+            "git+https://github.com/org/repo@abc123",
+            id="valid_git_https",
+        ),
+        pytest.param(
+            "git+ssh://git@github.com/org/repo@abc123",
+            id="valid_git_ssh",
+        ),
+    ],
+)
+def test_valid_vcs_url_accepted(url):
+    """Valid VCS URLs do not raise."""
+    _validate_vcs_url("pkg", url)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        pytest.param(
+            "git+https://github.com/org/repo",
+            id="missing_ref",
+        ),
+        pytest.param(
+            "git+https://github.com/org/repo@",
+            id="empty_ref",
+        ),
+        pytest.param(
+            "git+https://github.com/org/repo@--pathspec-from-file=/etc/shadow",
+            id="option_injection",
+        ),
+        pytest.param(
+            "git+ssh://-oProxyCommand=calc.exe/org/repo@abc123",
+            id="ssh_hostname_injection",
+        ),
+    ],
+)
+def test_invalid_vcs_url_rejected(url):
+    """Invalid VCS URLs raise PyBuildDepsError."""
+    with pytest.raises(PyBuildDepsError):
+        _validate_vcs_url("pkg", url)
 
 
 def test_unwrap_root_dir_strips_single_subdir(tmp_path):
@@ -79,6 +125,15 @@ def test_unsafe_archive_members_rejected(member):
     """Unsafe archive members raise PyBuildDepsError."""
     with pytest.raises(PyBuildDepsError):
         _validate_archive_members([member], "https://x")
+
+
+@pytest.mark.e2e
+def test_get_package_source_vcs(cache: Path):
+    """VCS source is cloned and cached as tarball."""
+    url = "git+https://github.com/pyca/cryptography.git@41.0.5"
+    source_tarball = get_package_source("cryptography", url)
+    assert source_tarball.exists()
+    assert source_tarball.name == "source.tar.gz"
 
 
 def test_download_archive_success(tmp_path, mocker):
