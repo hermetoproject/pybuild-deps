@@ -164,18 +164,21 @@ def compile(
 
 
 def _parse_requirements(repository, src_file):
+    from pip._internal.req.constructors import install_req_from_req_string
+
     try:
-        return list(
-            parse_requirements(
-                src_file,
-                finder=repository.finder,
-                session=repository.session,
-                options=repository.options,
-            )
-        )
+        reqs = list(parse_requirements(src_file))
     except PyBuildDepsError as err:
         log.error(str(err))
         sys.exit(2)
+
+    result = []
+    for req in reqs:
+        req_str = f"{req.name}{req.specifier}"
+        if req.url:
+            req_str = f"{req.name} @ {req.url}"
+        result.append(install_req_from_req_string(req_str))
+    return result
 
 
 def _handle_src_files():

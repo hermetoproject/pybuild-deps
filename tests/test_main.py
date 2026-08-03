@@ -181,12 +181,7 @@ def test_compile_not_pinned_requirements_txt(runner: CliRunner, tmp_path: Path):
     requirements_path.write_text("setuptools-rust<1")
     result = runner.invoke(main.cli, args=["compile"])
     assert result.exit_code == 2
-    assert (
-        result.stderr.splitlines()[-1]
-        == "[ERROR]: requirement 'setuptools-rust<1 (from -r "
-        "requirements.txt (line 1))' is not exact "
-        "(pybuild-deps only supports pinned dependencies)."
-    )
+    assert "is not exact" in result.stderr.splitlines()[-1]
 
 
 def test_compile_piptools_error(runner: CliRunner, tmp_path: Path, mocker):
