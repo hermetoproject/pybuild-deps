@@ -8,7 +8,13 @@ of build dependencies.
 
 from __future__ import annotations
 
+import subprocess
+import sys
+import tempfile
 from collections.abc import Generator, Iterable
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
 from pip._internal.exceptions import DistributionNotFound
 from pip._internal.req import InstallRequirement
@@ -18,10 +24,113 @@ from piptools.repositories import PyPIRepository
 from piptools.resolver import BacktrackingResolver
 from piptools.utils import key_from_ireq
 
-from .exceptions import UnsolvableDependenciesError
+
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
+
+from .exceptions import PyBuildDepsError, UnsolvableDependenciesError
 from .finder import find_build_dependencies
 from .logger import log
 from .utils import get_version
+
+
+@dataclass(frozen=True)
+class ResolvedDependency:
+    """A resolved package with name, version, and optional hashes."""
+
+    name: str
+    version: str
+    hashes: tuple[str, ...] = ()
+
+
+def _collect_hashes(pkg: dict[str, Any]) -> tuple[str, ...]:
+    """Collect hashes from a pylock.toml package entry as algo:digest strings."""
+    hashes = []
+    for artifact_key in ("sdist", "wheels"):
+        artifacts = pkg.get(artifact_key)
+        if artifacts is None:
+            continue
+        if isinstance(artifacts, dict):
+            artifacts = [artifacts]
+        for artifact in artifacts:
+            for algo, digest in artifact.get("hashes", {}).items():
+                hashes.append(f"{algo}:{digest}")
+    return tuple(hashes)
+
+
+def resolve_with_uv(
+    deps: list[str],
+    package: str,
+    constraints: list[str] | None = None,
+    generate_hashes: bool = False,
+) -> list[ResolvedDependency]:
+    """Resolve dependencies using uv pip compile.
+
+    Returns a list of ResolvedDependency with name, version, and
+    optional hashes parsed from pylock.toml output.
+    """
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        reqs_file = Path(tmp_dir) / "requirements.txt"
+        reqs_file.write_text("\n".join(deps) + "\n")
+
+        out_file = Path(tmp_dir) / "pylock.toml"
+
+        python_version = f"{sys.version_info.major}.{sys.version_info.minor}"
+        cmd = [
+            "uv",
+            "pip",
+            "compile",
+            "--python-version",
+            python_version,
+            "--format",
+            "pylock.toml",
+            "-o",
+            str(out_file),
+            str(reqs_file),
+        ]
+
+        if generate_hashes:
+            cmd.append("--generate-hashes")
+
+        if constraints:
+            constraints_file = Path(tmp_dir) / "constraints.txt"
+            constraints_file.write_text("\n".join(constraints) + "\n")
+            cmd.extend(["-c", str(constraints_file)])
+
+        try:
+            result = subprocess.run(  # noqa: S603
+                cmd,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=300,
+            )
+        except FileNotFoundError as err:
+            raise PyBuildDepsError(
+                "uv is not installed or not on PATH. "
+                "Install it from https://docs.astral.sh/uv/"
+            ) from err
+        except subprocess.TimeoutExpired as err:
+            raise PyBuildDepsError(
+                f"Dependency resolution for '{package}' timed out after 300s"
+            ) from err
+
+        if result.returncode != 0:
+            raise UnsolvableDependenciesError(package, result.stderr.strip())
+
+        with open(out_file, "rb") as f:
+            lockdata = tomllib.load(f)
+
+    return [
+        ResolvedDependency(
+            name=pkg["name"],
+            version=pkg["version"],
+            hashes=_collect_hashes(pkg),
+        )
+        for pkg in lockdata.get("packages", [])
+    ]
 
 
 class BuildDependencyCompiler:

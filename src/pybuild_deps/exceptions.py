@@ -21,12 +21,17 @@ class UnsolvableDependenciesError(PyBuildDepsError):
     def __init__(
         self,
         package: str,
-        unsolvable_deps: Iterable[Iterable[RequirementInformation]],
+        unsolvable_deps: str | Iterable[Iterable[RequirementInformation]],
     ):
         self.unsolvable_deps = unsolvable_deps
         self.package = package
 
     def __str__(self):
+        if isinstance(self.unsolvable_deps, str):
+            return (
+                f"Failed to resolve dependencies for package "
+                f"'{self.package}':\n{self.unsolvable_deps}"
+            )
         unsolvable_deps = "\n".join(
             str(d.requirement) for deps in self.unsolvable_deps for d in deps
         )
