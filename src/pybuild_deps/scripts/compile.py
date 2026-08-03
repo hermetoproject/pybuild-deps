@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import os
+import shlex
 import sys
 from pathlib import Path
 from typing import IO, Any, BinaryIO, cast
 
 import click
 from click.utils import LazyFile
+from packaging.requirements import Requirement
 from pip._internal.req import InstallRequirement
 from piptools.exceptions import PipToolsError
 from piptools.repositories import PyPIRepository
@@ -24,7 +26,7 @@ from pybuild_deps.compile_build_dependencies import (
 from pybuild_deps.constants import PIPTOOLS_CACHE_DIR
 from pybuild_deps.exceptions import PyBuildDepsError
 from pybuild_deps.logger import log
-from pybuild_deps.parsers import parse_requirements
+from pybuild_deps.parsers import RequirementsFile, read_requirements_file
 from pybuild_deps.utils import get_version
 
 
@@ -103,15 +105,23 @@ def compile(
         log.warning("No output file (-o) specified. Defaulting to 'dry run' mode.")
         dry_run = True
 
-    repository = PyPIRepository([], cache_dir=PIPTOOLS_CACHE_DIR)
+    parsed = [_read_requirements(src_file) for src_file in src_files]
+    pip_args = [arg for f in parsed for line in f.options for arg in shlex.split(line)]
+    repository = PyPIRepository(pip_args, cache_dir=PIPTOOLS_CACHE_DIR)
 
-    dependencies: list[InstallRequirement] = []
-    for src_file in src_files:
-        dependencies.extend(_parse_requirements(repository, src_file))
+    dependencies = [_to_ireq(req) for f in parsed for req in f.requirements]
+    constraints = [
+        _to_ireq(req) for f in parsed for req in f.constraints if _is_exact_pin(req)
+    ]
 
     compiler = BuildDependencyCompiler(repository)
     try:
-        results = compiler.resolve(dependencies)
+        results = compiler.resolve(
+            dependencies,
+            existing_constraints={
+                key_from_ireq(ireq): ireq for ireq in constraints + dependencies
+            },
+        )
         hashes = None
         if generate_hashes and compiler.resolver is not None:
             hashes = compiler.resolver.resolve_hashes(results)
@@ -163,19 +173,26 @@ def compile(
         log.info("Dry-run, so no file created/updated.")
 
 
-def _parse_requirements(repository, src_file):
+def _read_requirements(src_file: str) -> RequirementsFile:
     try:
-        return list(
-            parse_requirements(
-                src_file,
-                finder=repository.finder,
-                session=repository.session,
-                options=repository.options,
-            )
-        )
+        return read_requirements_file(src_file)
     except PyBuildDepsError as err:
         log.error(str(err))
         sys.exit(2)
+
+
+def _to_ireq(req: Requirement) -> InstallRequirement:
+    from pip._internal.req.constructors import install_req_from_req_string
+
+    req_str = f"{req.name}{req.specifier}"
+    if req.url:
+        req_str = f"{req.name} @ {req.url}"
+    return install_req_from_req_string(req_str)
+
+
+def _is_exact_pin(req: Requirement) -> bool:
+    specs = list(req.specifier)
+    return not req.url and len(specs) == 1 and specs[0].operator == "=="
 
 
 def _handle_src_files():
