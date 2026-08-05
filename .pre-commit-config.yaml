@@ -1,3 +1,4 @@
+exclude: ^src/pybuild_deps/modules/
 repos:
   - repo: local
     hooks:
