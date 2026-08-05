@@ -57,9 +57,19 @@ docs = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/pybuild_deps"]
+# The pip submodule contains the full pip repo (tests, docs, vendored deps).
+# Exclude everything first, then force-include only src/pip/ which is the
+# actual pip package we need. The sdist uses the same approach.
+exclude = ["src/pybuild_deps/modules/pip/"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/pybuild_deps/modules/pip/src/pip" = "pybuild_deps/modules/pip/src/pip"
 
 [tool.hatch.build.targets.sdist]
-exclude = [".venv/", ".nox/"]
+exclude = [".venv/", ".nox/", "src/pybuild_deps/modules/pip/"]
+
+[tool.hatch.build.targets.sdist.force-include]
+"src/pybuild_deps/modules/pip/src/pip" = "src/pybuild_deps/modules/pip/src/pip"
 
 [tool.ruff.lint.isort]
 force-single-line = false
@@ -67,6 +77,7 @@ lines-after-imports = 2
 
 [tool.ruff]
 src = ["src", "tests"]
+extend-exclude = ["src/pybuild_deps/modules"]
 
 [tool.ruff.lint]
 extend-select = [
@@ -118,11 +129,12 @@ convention = "google"
 
 [tool.pydoclint]
 style = 'google'
-exclude = '\.git|\.nox'
+exclude = '\.git|\.nox|modules'
 arg-type-hints-in-docstring = false
 
 [tool.pytest.ini_options]
 markers = [
     "e2e: end to end tests (require network access).",
 ]
+norecursedirs = ["src/pybuild_deps/modules"]
 tmp_path_retention_count = 1

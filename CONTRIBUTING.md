@@ -39,7 +39,15 @@ Request features on the [Issue Tracker].
 
 You need Python 3.10+ and [uv].
 
+Clone with submodules and set up sparse checkout for the pip module to save on disk space:
+
 ```console
+$ git clone --recurse-submodules https://github.com/hermetoproject/pybuild-deps.git
+$ cd pybuild-deps
+$ cd src/pybuild_deps/modules/pip
+$ git sparse-checkout init --cone
+$ git sparse-checkout set src/pip
+$ cd -
 $ uv sync
 $ source .venv/bin/activate
 ```

@@ -1,0 +1,5 @@
+[submodule "src/pybuild_deps/modules/pip"]
+	path = src/pybuild_deps/modules/pip
+	url = https://github.com/pypa/pip.git
+	shallow = true
+	branch = 26.1.2
