@@ -24,6 +24,9 @@ dependencies = [
 name = "Bruno Ciconelle"
 email = "bciconel@redhat.com"
 
+[[project.maintainers]]
+name = "Hermeto team"
+
 [project.scripts]
 pybuild-deps = "pybuild_deps.__main__:cli"
 
@@ -32,6 +35,8 @@ Homepage = "https://github.com/hermetoproject/pybuild-deps"
 Repository = "https://github.com/hermetoproject/pybuild-deps"
 Documentation = "https://pybuild-deps.readthedocs.io"
 Changelog = "https://github.com/hermetoproject/pybuild-deps/releases"
+Issues = "https://github.com/hermetoproject/pybuild-deps/issues"
+Discussions = "https://github.com/hermetoproject/pybuild-deps/discussions"
 
 [dependency-groups]
 dev = [
