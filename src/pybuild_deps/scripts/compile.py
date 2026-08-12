@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import os
 import sys
 from pathlib import Path
@@ -190,8 +191,19 @@ def _handle_src_files():
     return src_files
 
 
+def _piptools_output_writer_accepts_generate_hashes() -> bool:
+    """Return whether the installed pip-tools OutputWriter still takes generate_hashes."""
+    return "generate_hashes" in inspect.signature(PipToolsWriter.__init__).parameters
+
+
 class OutputWriter(PipToolsWriter):
     """pip-tools OutputWriter with customizations for pybuild-deps."""
+
+    def __init__(self, *args: Any, generate_hashes: bool = False, **kwargs: Any) -> None:
+        if _piptools_output_writer_accepts_generate_hashes():
+            super().__init__(*args, generate_hashes=generate_hashes, **kwargs)
+        else:
+            super().__init__(*args, **kwargs)
 
     def _sort_key(self, ireq: InstallRequirement) -> tuple[bool, str]:
         return (not ireq.editable, f"{ireq.name}=={get_version(ireq)}")
