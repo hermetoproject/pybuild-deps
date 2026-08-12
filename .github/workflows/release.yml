@@ -18,7 +18,7 @@ jobs:
       contents: write # Required for pushing tags - https://docs.github.com/en/actions/writing-workflows/workflow-syntax-for-github-actions#permissions
     steps:
       - name: Check out the repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 2
           submodules: true
