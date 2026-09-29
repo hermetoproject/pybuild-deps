@@ -8,8 +8,18 @@ of build dependencies.
 
 from __future__ import annotations
 
-from collections.abc import Generator, Iterable
+import re
+import subprocess
+import sys
+import tempfile
+from collections.abc import Generator, Iterable, Sequence
+from dataclasses import dataclass, replace
+from functools import partial
+from pathlib import Path
 
+from packaging.requirements import InvalidRequirement, Requirement
+from packaging.specifiers import SpecifierSet
+from packaging.utils import canonicalize_name
 from pip._internal.exceptions import DistributionNotFound
 from pip._internal.req import InstallRequirement
 from pip._internal.req.constructors import install_req_from_req_string
@@ -17,11 +27,196 @@ from pip._vendor.resolvelib.resolvers import ResolutionImpossible
 from piptools.repositories import PyPIRepository
 from piptools.resolver import BacktrackingResolver
 from piptools.utils import key_from_ireq
+from uv import find_uv_bin
 
-from .exceptions import UnsolvableDependenciesError
+from .exceptions import PyBuildDepsError, UnsolvableDependenciesError
 from .finder import find_build_dependencies
 from .logger import log
 from .utils import get_version
+
+
+@dataclass(frozen=True)
+class ResolvedDependency:
+    """A resolved package with name, version, hashes and what requires it."""
+
+    name: str
+    version: str
+    hashes: tuple[str, ...] = ()
+    via: frozenset[str] = frozenset()
+
+
+_INPUT_FILE = "requirements.in"
+_OUTPUT_FILE = "requirements.txt"
+_CONSTRAINTS_FILE = "constraints.txt"
+_PROJECT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+
+def _parse_compiled_output(text: str, package: str) -> list[ResolvedDependency]:
+    """Parse ``uv pip compile`` requirements output into ResolvedDependency.
+
+    Each pinned requirement is a ``name==version`` line, optionally followed
+    by ``--hash=`` continuation lines joined with a trailing backslash. The
+    line style ``# via`` annotation, inline or on the line after the hashes,
+    is kept. uv's reference to its input file becomes the name of
+    ``package``, whose build requires the dependency, and its reference to
+    the constraints file is left out. Other comments are ignored.
+    """
+    match = _PROJECT_NAME.match(package)
+    requested_by = canonicalize_name(match.group()) if match else package
+    results: list[ResolvedDependency] = []
+    buf = ""
+    for raw in text.splitlines():
+        code, _, annotation = raw.partition("# via ")
+        code = code.strip()
+        if code.startswith("#"):
+            continue
+        if code:
+            buf = f"{buf} {code}" if buf else code
+            if buf.endswith("\\"):
+                buf = buf[:-1].strip()
+                continue
+            tokens = buf.split()
+            buf = ""
+            name, _, version = tokens[0].partition("==")
+            hashes = tuple(
+                t[len("--hash=") :] for t in tokens[1:] if t.startswith("--hash=")
+            )
+            results.append(
+                ResolvedDependency(name=name, version=version, hashes=hashes)
+            )
+        if annotation and results:
+            sources = annotation.strip().split(", ")
+            # constraints only narrow versions, they never require a package
+            via = {
+                requested_by if source.startswith("-r ") else source
+                for source in sources
+                if not source.startswith("-c ")
+            }
+            results[-1] = replace(results[-1], via=frozenset(via))
+    return results
+
+
+def resolve_with_uv(
+    deps: list[str],
+    package: str,
+    pins: list[str] | None = None,
+    options: list[str] | None = None,
+    generate_hashes: bool = False,
+) -> list[ResolvedDependency]:
+    """Resolve dependencies using uv pip compile.
+
+    Returns a list of ResolvedDependency with name, version, optional hashes
+    and annotations. The requirements output format records every
+    distribution hash for each pinned version (matching pip-compile), unlike
+    pylock.toml which only records artifacts for the resolved environment.
+
+    ``pins`` are ``name==version`` runtime pins that should hold where they
+    can, the way pip-tools treats existing constraints. Pins conflicting with
+    one of ``deps`` are dropped, the rest are passed as constraints. If uv
+    finds no solution with them, they are passed again as preferences, which
+    uv keeps only where they are compatible.
+
+    ``options`` are pip option lines (``--index-url``, ``--find-links`` and so
+    on) placed at the top of the input file, where uv honors them like pip.
+
+    Resolution targets the running interpreter, and ``--no-config`` keeps a
+    ``uv.toml`` or ``[tool.uv]`` in the working directory from changing the
+    result.
+    """
+    pins = _compatible_pins(deps, pins or [])
+    resolve = partial(_run_uv, deps, package, options or [], generate_hashes)
+    if not pins:
+        return resolve()
+    try:
+        return resolve(constraints=pins)
+    except UnsolvableDependenciesError:
+        return resolve(preferences=pins)
+
+
+def _compatible_pins(deps: list[str], pins: list[str]) -> list[str]:
+    """Drop pins that conflict with a direct requirement, as pip-tools does."""
+    specifiers: dict[str, list[SpecifierSet]] = {}
+    for dep in deps:
+        try:
+            req = Requirement(dep)
+        except InvalidRequirement:
+            continue  # uv reports it
+        specifiers.setdefault(canonicalize_name(req.name), []).append(req.specifier)
+    compatible = []
+    for pin in pins:
+        req = Requirement(pin)
+        version = next(iter(req.specifier)).version
+        if all(
+            specifier.contains(version, prereleases=True)
+            for specifier in specifiers.get(canonicalize_name(req.name), [])
+        ):
+            compatible.append(pin)
+    return compatible
+
+
+def _run_uv(
+    deps: list[str],
+    package: str,
+    options: list[str],
+    generate_hashes: bool,
+    constraints: Sequence[str] = (),
+    preferences: Sequence[str] = (),
+) -> list[ResolvedDependency]:
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        Path(tmp_dir, _INPUT_FILE).write_text("\n".join([*options, *deps]) + "\n")
+        if preferences:
+            # uv prefers the versions already in its output file
+            Path(tmp_dir, _OUTPUT_FILE).write_text("\n".join(preferences) + "\n")
+
+        try:
+            cmd = [
+                find_uv_bin(),
+                "pip",
+                "compile",
+                "--no-config",
+                "--python",
+                sys.executable,
+                "--annotation-style",
+                "line",
+                "-o",
+                _OUTPUT_FILE,
+                _INPUT_FILE,
+            ]
+            if constraints:
+                Path(tmp_dir, _CONSTRAINTS_FILE).write_text(
+                    "\n".join(constraints) + "\n"
+                )
+                cmd.extend(["-c", _CONSTRAINTS_FILE])
+            if generate_hashes:
+                cmd.append("--generate-hashes")
+            result = subprocess.run(  # noqa: S603
+                cmd,
+                cwd=tmp_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=300,
+            )
+        except FileNotFoundError as err:
+            raise PyBuildDepsError(
+                "uv executable not found. Reinstall pybuild-deps to restore it."
+            ) from err
+        except subprocess.TimeoutExpired as err:
+            raise PyBuildDepsError(
+                f"Dependency resolution for '{package}' timed out after 300s"
+            ) from err
+
+        # uv exits with 1 when there's no solution and 2 on errors
+        if result.returncode == 1:
+            raise UnsolvableDependenciesError(package, result.stderr.strip())
+        if result.returncode != 0:
+            raise PyBuildDepsError(
+                f"uv failed resolving dependencies for '{package}':\n"
+                f"{result.stderr.strip()}"
+            )
+
+        output = Path(tmp_dir, _OUTPUT_FILE).read_text()
+        return _parse_compiled_output(output, package)
 
 
 class BuildDependencyCompiler:

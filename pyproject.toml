@@ -18,6 +18,7 @@ dependencies = [
     "packaging>=21.0",
     "pip-tools>=7,<7.6.1",
     "gitpython",
+    "uv>=0.8",
 ]
 
 [[project.authors]]
