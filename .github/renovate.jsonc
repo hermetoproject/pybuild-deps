@@ -1,0 +1,81 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "schedule:monthly",
+    ":enableVulnerabilityAlerts",
+    ":disableDependencyDashboard"
+  ],
+  "enabledManagers": ["github-actions", "pep621", "pre-commit"],
+  // The pre-commit manager ships disabled; listing it in enabledManagers is
+  // not enough, it must be opted in explicitly.
+  "pre-commit": {
+    "enabled": true
+  },
+  // release-drafter buckets dependency PRs by the "dependencies" label;
+  // dependabot added it automatically, Renovate needs it set explicitly.
+  "labels": ["dependencies"],
+  // pep621 skips deps declared without a version specifier (gitpython, nox,
+  // tomli) and never bumps transitive deps. Refresh uv.lock wholesale to keep
+  // them current, matching the old Dependabot uv behavior.
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 5am on the first day of the month"]
+  },
+  "packageRules": [
+    {
+      "description": "Weekly grouped GitHub Actions updates",
+      "matchManagers": ["github-actions"],
+      "extends": ["schedule:weekly"],
+      "groupName": "github-actions"
+    },
+    {
+      "description": "Disable Python version updates in GitHub Actions",
+      "matchManagers": ["github-actions"],
+      "matchDepNames": ["python"],
+      "enabled": false
+    },
+    // Disable only non-minor/patch types; disabling the whole manager stops
+    // all updates including vulnerability-alert PRs.
+    {
+      "description": "Disable non-minor/patch Python updates",
+      "matchManagers": ["pep621"],
+      "matchUpdateTypes": [
+        "major",
+        "pin",
+        "pinDigest",
+        "digest",
+        "rollback",
+        "bump",
+        "replacement"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "Group Python minor and patch updates (pyproject.toml + uv.lock)",
+      "matchManagers": ["pep621"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "python dependencies"
+    },
+    {
+      "description": "Disable non-minor/patch pre-commit updates",
+      "matchManagers": ["pre-commit"],
+      "matchUpdateTypes": [
+        "major",
+        "pin",
+        "pinDigest",
+        "digest",
+        "rollback",
+        "bump",
+        "replacement"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "Group pre-commit minor and patch updates",
+      "matchManagers": ["pre-commit"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "pre-commit hooks"
+    }
+  ]
+}
