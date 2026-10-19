@@ -22,7 +22,7 @@ def persistent_cache(cache_name: str, ignore_kwargs: list | None = None):
                 k: v for k, v in kwargs.items() if k not in ignore_kwargs
             }
             key = hashlib.md5((str(args) + str(filtered_kwargs)).encode()).hexdigest()  # noqa: S324
-            CACHE_PATH.mkdir(exist_ok=True)
+            CACHE_PATH.mkdir(parents=True, exist_ok=True)
             with shelve.open(str(CACHE_PATH / cache_name)) as cache:  # noqa: S301
                 # Check if the result is already cached
                 if key in cache:
