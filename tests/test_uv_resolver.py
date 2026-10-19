@@ -1,5 +1,6 @@
 """Tests for the uv-based dependency resolver."""
 
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -9,7 +10,9 @@ import pytest
 from pybuild_deps import compile_build_dependencies
 from pybuild_deps.compile_build_dependencies import (
     ResolvedDependency,
+    _deduplicate,
     _parse_compiled_output,
+    _to_requirement_string,
     resolve_with_uv,
 )
 from pybuild_deps.exceptions import PyBuildDepsError, UnsolvableDependenciesError
@@ -49,6 +52,51 @@ def test_parse_compiled_output_collects_every_hash():
     ]
 
 
+def test_parse_compiled_output_preserves_direct_url():
+    """Remote direct URL resolutions do not have a version specifier to parse."""
+    results = _parse_compiled_output(
+        "demo @ https://example.invalid/demo-1.0.tar.gz\n", "foo==1.0"
+    )
+    assert results == [
+        ResolvedDependency(
+            name="demo",
+            version="",
+            url="https://example.invalid/demo-1.0.tar.gz",
+        )
+    ]
+
+
+def test_deduplicate_preserves_distinct_markers():
+    """Same package versions with different markers remain separate."""
+    results = _deduplicate(
+        [
+            ResolvedDependency(
+                name="foo", version="1.0", marker="python_version < '3.11'"
+            ),
+            ResolvedDependency(
+                name="foo", version="1.0", marker="python_version >= '3.11'"
+            ),
+        ]
+    )
+    assert {dep.marker for dep in results} == {
+        "python_version < '3.11'",
+        "python_version >= '3.11'",
+    }
+
+
+def test_recursive_requirement_preserves_url_and_marker():
+    """Recursive requirements retain remote URLs and environment markers."""
+    dep = ResolvedDependency(
+        name="demo",
+        version="",
+        url="https://example.invalid/demo-1.0.tar.gz",
+        marker='python_version >= "3.10"',
+    )
+    assert _to_requirement_string(dep) == (
+        'demo @ https://example.invalid/demo-1.0.tar.gz ; python_version >= "3.10"'
+    )
+
+
 @pytest.mark.parametrize(
     ("package", "annotation", "expected"),
     [
@@ -77,11 +125,13 @@ class FakeUv:
         self.returncodes = [0]
         self.stderr = ""
         self.calls = []
+        self.envs = []
 
     def __call__(self, cmd, cwd, **kwargs):
         """Snapshot the files given to uv and answer with a canned resolution."""
         files = {path.name: path.read_text() for path in Path(cwd).iterdir()}
         self.calls.append((cmd, files))
+        self.envs.append(kwargs.get("env", {}))
         Path(cwd, "requirements.txt").write_text("wheel==0.40.0\n")
         returncode = self.returncodes[len(self.calls) - 1]
         return subprocess.CompletedProcess(cmd, returncode, "", self.stderr)
@@ -105,6 +155,7 @@ UV_COMMAND = [
     sys.executable,
     "--annotation-style",
     "line",
+    "--no-strip-markers",
     "-o",
     "requirements.txt",
     "requirements.in",
@@ -141,6 +192,199 @@ def test_resolve_with_options_and_pins(fake_uv):
     ]
 
 
+def test_resolve_with_range_constraint(fake_uv):
+    """Pass range constraints to uv unchanged."""
+    resolve_with_uv(["setuptools>=42"], package="foo==1.0", pins=["setuptools<70"])
+    assert fake_uv.calls[0][1]["constraints.txt"] == "setuptools<70\n"
+
+
+def test_resolve_normalizes_relative_find_links(fake_uv, tmp_path, monkeypatch):
+    """Resolve relative find-links paths from the caller's working directory."""
+    monkeypatch.chdir(tmp_path)
+    resolve_with_uv(["wheel"], package="foo==1.0", options=["--find-links ./wheels"])
+    find_links_path = shlex.quote(str(tmp_path / "wheels"))
+    assert fake_uv.calls[0][1]["requirements.in"] == (
+        f"--find-links {find_links_path}\nwheel\n"
+    )
+
+
+def test_resolve_quotes_relative_find_links_with_spaces(fake_uv, tmp_path, monkeypatch):
+    """Normalized find-links paths remain one option when they contain spaces."""
+    monkeypatch.chdir(tmp_path)
+    resolve_with_uv(
+        ["wheel"], package="foo==1.0", options=["--find-links './wheel files'"]
+    )
+    assert fake_uv.calls[0][1]["requirements.in"] == (
+        f"--find-links '{tmp_path / 'wheel files'}'\nwheel\n"
+    )
+
+
+@pytest.mark.parametrize(
+    ("option", "expected"),
+    [
+        (
+            r"--find-links C:\Users\runner\wheels",
+            "--find-links file:///C:/Users/runner/wheels\nwheel\n",
+        ),
+        (
+            r'--find-links "C:\Program Files\wheels"',
+            "--find-links file:///C:/Program%20Files/wheels\nwheel\n",
+        ),
+    ],
+)
+def test_resolve_normalizes_windows_find_links(fake_uv, option, expected):
+    """Write Windows paths as file URLs so uv does not treat the drive as a scheme."""
+    resolve_with_uv(
+        ["wheel"],
+        package="foo==1.0",
+        options=[option],
+    )
+    assert fake_uv.calls[0][1]["requirements.in"] == expected
+
+
+def test_resolve_normalizes_windows_find_links_from_environment(fake_uv, monkeypatch):
+    """Normalize Windows paths supplied through UV_FIND_LINKS too."""
+    monkeypatch.setenv("UV_FIND_LINKS", r"C:\Users\runner\wheels")
+    monkeypatch.delenv("PIP_FIND_LINKS", raising=False)
+    resolve_with_uv(["wheel"], package="foo==1.0")
+    assert fake_uv.envs[0]["UV_FIND_LINKS"] == "file:///C:/Users/runner/wheels"
+
+
+def test_resolve_maps_pip_index_environment(fake_uv, monkeypatch):
+    """Pass the pip index environment through uv's equivalent variable."""
+    monkeypatch.setenv("PIP_INDEX_URL", "https://example.com/simple")
+    monkeypatch.delenv("UV_INDEX_URL", raising=False)
+    resolve_with_uv(["wheel"], package="foo==1.0")
+    assert fake_uv.envs[0]["UV_INDEX_URL"] == "https://example.com/simple"
+
+
+def test_resolve_maps_multiple_pip_find_links(local_index, tmp_path, monkeypatch):
+    """Convert pip's space-separated find-links list to uv's comma-separated form."""
+    wheels = Path(local_index[1].removeprefix("--find-links "))
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    wheel = wheels / "plugin-1.0-py3-none-any.whl"
+    (second / wheel.name).write_bytes(wheel.read_bytes())
+    monkeypatch.setenv("PIP_FIND_LINKS", f"{first} {second}")
+    monkeypatch.setenv("PIP_NO_INDEX", "true")
+    for variable in (
+        "PIP_INDEX_URL",
+        "PIP_EXTRA_INDEX_URL",
+        "UV_DEFAULT_INDEX",
+        "UV_EXTRA_INDEX_URL",
+        "UV_FIND_LINKS",
+        "UV_INDEX",
+        "UV_INDEX_STRATEGY",
+        "UV_INDEX_URL",
+    ):
+        monkeypatch.delenv(variable, raising=False)
+
+    results = resolve_with_uv(["plugin"], package="foo==1.0")
+
+    assert {dep.name: dep.version for dep in results} == {"plugin": "1.0"}
+
+
+@pytest.mark.parametrize("variable", ["PIP_FIND_LINKS", "UV_FIND_LINKS"])
+def test_resolve_relative_find_links_from_caller_cwd(
+    local_index, tmp_path, monkeypatch, variable
+):
+    """Environment find-links paths use the caller's cwd, not uv's temp cwd."""
+    monkeypatch.chdir(tmp_path)
+    for name in (
+        "PIP_INDEX_URL",
+        "PIP_EXTRA_INDEX_URL",
+        "PIP_FIND_LINKS",
+        "UV_DEFAULT_INDEX",
+        "UV_EXTRA_INDEX_URL",
+        "UV_FIND_LINKS",
+        "UV_INDEX",
+        "UV_INDEX_STRATEGY",
+        "UV_INDEX_URL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("PIP_NO_INDEX", "true")
+    monkeypatch.setenv(variable, "./wheels")
+
+    results = resolve_with_uv(["plugin"], package="foo==1.0")
+
+    assert {dep.name: dep.version for dep in results} == {"plugin": "2.0"}
+
+
+def test_resolve_false_pip_no_index_does_not_disable_index(fake_uv, monkeypatch):
+    """A false PIP_NO_INDEX value must not become uv's --no-index flag."""
+    monkeypatch.setenv("PIP_NO_INDEX", "false")
+    resolve_with_uv(["wheel"], package="foo==1.0")
+    assert fake_uv.calls[0][0] == UV_COMMAND
+
+
+def _write_simple_index(index_root: Path, package: str, wheels: list[Path]) -> str:
+    """Write one PEP 503 project page and return the index URL."""
+    project_page = index_root / package
+    project_page.mkdir(parents=True)
+    links = "\n".join(
+        f'<a href="{wheel.as_uri()}">{wheel.name}</a>' for wheel in wheels
+    )
+    (project_page / "index.html").write_text(links)
+    return index_root.as_uri()
+
+
+def test_resolve_honors_pip_no_index(local_index, tmp_path, monkeypatch):
+    """PIP_NO_INDEX disables an index even when PIP_INDEX_URL is set."""
+    wheels = Path(local_index[1].removeprefix("--find-links "))
+    wheel = wheels / "plugin-1.0-py3-none-any.whl"
+    index_url = _write_simple_index(tmp_path / "index", "plugin", [wheel])
+    monkeypatch.setenv("PIP_INDEX_URL", index_url)
+    monkeypatch.setenv("PIP_NO_INDEX", "true")
+    for variable in (
+        "PIP_EXTRA_INDEX_URL",
+        "PIP_FIND_LINKS",
+        "UV_DEFAULT_INDEX",
+        "UV_EXTRA_INDEX_URL",
+        "UV_FIND_LINKS",
+        "UV_INDEX",
+        "UV_INDEX_STRATEGY",
+        "UV_INDEX_URL",
+    ):
+        monkeypatch.delenv(variable, raising=False)
+
+    with pytest.raises(UnsolvableDependenciesError):
+        resolve_with_uv(["plugin"], package="foo==1.0")
+
+
+def test_resolve_uses_uv_first_index_strategy(local_index, tmp_path, monkeypatch):
+    """The resolver stops at the first matching index, even if a later one is newer."""
+    wheels = Path(local_index[1].removeprefix("--find-links "))
+    default_index = _write_simple_index(
+        tmp_path / "default-index",
+        "plugin",
+        [wheels / "plugin-2.0-py3-none-any.whl"],
+    )
+    extra_index = _write_simple_index(
+        tmp_path / "extra-index",
+        "plugin",
+        [wheels / "plugin-1.0-py3-none-any.whl"],
+    )
+    monkeypatch.setenv("PIP_INDEX_URL", default_index)
+    monkeypatch.setenv("PIP_EXTRA_INDEX_URL", extra_index)
+    for variable in (
+        "PIP_FIND_LINKS",
+        "PIP_NO_INDEX",
+        "UV_DEFAULT_INDEX",
+        "UV_EXTRA_INDEX_URL",
+        "UV_FIND_LINKS",
+        "UV_INDEX",
+        "UV_INDEX_STRATEGY",
+        "UV_INDEX_URL",
+    ):
+        monkeypatch.delenv(variable, raising=False)
+
+    results = resolve_with_uv(["plugin"], package="foo==1.0")
+
+    assert {dep.name: dep.version for dep in results} == {"plugin": "1.0"}
+
+
 def test_resolve_falls_back_to_preferences(fake_uv):
     """Without a solution under the pins, they are passed again as preferences."""
     fake_uv.returncodes = [1, 0]
@@ -159,7 +403,7 @@ def test_resolve_unsolvable(fake_uv):
     with pytest.raises(UnsolvableDependenciesError) as exc_info:
         resolve_with_uv(["wheel"], package="foo==1.0")
     assert exc_info.value.package == "foo==1.0"
-    assert exc_info.value.unsolvable_deps == "No solution found"
+    assert exc_info.value.details == "No solution found"
 
 
 def test_resolve_error_is_not_retried(fake_uv):
@@ -206,6 +450,18 @@ def test_resolve_offline(local_index):
     ]
 
 
+def test_resolve_ignores_explicit_uv_config(local_index, tmp_path, monkeypatch):
+    """The resolver ignores even an explicitly supplied uv config file."""
+    config = tmp_path / "uv.toml"
+    config.write_text("[\n")
+    monkeypatch.setenv("UV_CONFIG_FILE", str(config))
+    results = resolve_with_uv(["backend"], package="foo==1.0", options=local_index)
+    assert {dep.name: dep.version for dep in results} == {
+        "backend": "1.0",
+        "helper": "3.0",
+    }
+
+
 def test_resolve_offline_pins_hold(local_index):
     """Compatible pins hold, even if that means an older version elsewhere.
 
@@ -235,6 +491,19 @@ def test_resolve_offline_pin_conflicting_with_deps(local_index, mocker):
         "plugin": "1.0",
     }
     assert run.call_count == 1
+
+
+def test_resolve_offline_range_constraint_conflicting_with_deps(local_index, mocker):
+    """An incompatible range constraint is retried as a preference."""
+    run = mocker.spy(subprocess, "run")
+    results = resolve_with_uv(
+        ["helper>=3"],
+        package="foo==1.0",
+        pins=["helper<2"],
+        options=local_index,
+    )
+    assert {dep.name: dep.version for dep in results} == {"helper": "3.0"}
+    assert run.call_count == 2
 
 
 def test_resolve_offline_pins_fall_back_to_preferences(local_index):
