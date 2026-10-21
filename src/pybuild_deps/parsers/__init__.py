@@ -9,7 +9,11 @@ try:
     import tomllib as toml
 except ImportError:
     import tomli as toml
-from .requirements import parse_requirements
+from .requirements import (
+    RequirementsFile,
+    parse_requirements,
+    read_requirements_file,
+)
 from .setup_py import (
     SetupPyParsingError,
     parse_setup_py,
