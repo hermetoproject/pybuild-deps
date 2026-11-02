@@ -3,40 +3,63 @@
 from __future__ import annotations
 
 import os
+import shlex
 import sys
 from pathlib import Path
-from typing import IO, Any, BinaryIO, cast
+from typing import IO, Any
 
 import click
 from click.utils import LazyFile
-from pip._internal.req import InstallRequirement
-from piptools.exceptions import PipToolsError
-from piptools.repositories import PyPIRepository
-from piptools.utils import get_compile_command as _get_compile_command
-from piptools.utils import (
-    key_from_ireq,
-)
-from piptools.writer import OutputWriter as PipToolsWriter
+from packaging.requirements import Requirement
 
-from pybuild_deps.compile_build_dependencies import (
-    BuildDependencyCompiler,
-)
-from pybuild_deps.constants import PIPTOOLS_CACHE_DIR
+from pybuild_deps.compile_build_dependencies import BuildDependencyCompiler
 from pybuild_deps.exceptions import PyBuildDepsError
 from pybuild_deps.logger import log
-from pybuild_deps.parsers import parse_requirements
-from pybuild_deps.utils import get_version
+from pybuild_deps.parsers import RequirementsFile, read_requirements_file
+from pybuild_deps.writer import render
 
 
 REQUIREMENTS_TXT = "requirements.txt"
+# Options that don't change the result, left out of the header's command.
+COMPILE_EXCLUDE_OPTIONS = {"--dry-run", "--quiet", "--verbose"}
+# pip settings and their uv equivalents.
+PIP_UV_ENV = {
+    "PIP_INDEX_URL": "UV_INDEX_URL",
+    "PIP_EXTRA_INDEX_URL": "UV_EXTRA_INDEX_URL",
+    "PIP_FIND_LINKS": "UV_FIND_LINKS",
+}
 
 
-def get_compile_command(click_ctx):
-    """Get pip-compile equivalent command and adjust for pybuild-deps."""
-    command = _get_compile_command(click_ctx)
-    # this is just overriding the command for reproducibility. pip-compile will still
-    # get credits since it will be displayed in the top of the header.
-    return command.replace("pip-compile", "pybuild-deps compile")
+def get_compile_command(click_ctx: click.Context) -> str:
+    """Get the normalized command for the header, the way pip-compile did.
+
+    Long option names, no default values, sorted arguments, and no options
+    that don't change the result, like --verbose.
+    """
+    params = {param.name: param for param in click_ctx.command.params}
+    left_args = []
+    right_args = []
+    for name, value in click_ctx.params.items():
+        param = params[name]
+        if not isinstance(param, click.Option):
+            # src_files; re-add the "--" click strips if any starts with "-"
+            if any(val.startswith("-") and val != "-" for val in value):
+                right_args.append("--")
+            right_args.extend(shlex.quote(val) for val in value)
+            continue
+        long_name = param.opts[-1]
+        negative = param.secondary_opts[-1] if param.secondary_opts else None
+        if {long_name, negative} & COMPILE_EXCLUDE_OPTIONS:
+            continue
+        if value is None or value == param.default:
+            continue
+        if isinstance(value, LazyFile):
+            value = value.name
+        if param.is_flag:
+            left_args.append(long_name if value else negative)
+        else:
+            left_args.append(f"{long_name}={shlex.quote(str(value))}")
+    return " ".join(["pybuild-deps compile", *sorted(left_args), *sorted(right_args)])
 
 
 @click.command(context_settings={"help_option_names": ("-h", "--help")})
@@ -102,80 +125,91 @@ def compile(
     if not output_file and not dry_run:
         log.warning("No output file (-o) specified. Defaulting to 'dry run' mode.")
         dry_run = True
+    _warn_pip_env()
 
-    repository = PyPIRepository([], cache_dir=PIPTOOLS_CACHE_DIR)
+    parsed = [_read_requirements(src_file) for src_file in src_files]
+    requirements = [_to_req_str(req) for f in parsed for req in f.requirements]
+    # Input pins and all constraints steer resolution, but constraints do not
+    # become build dependencies.
+    pins = [
+        _to_req_str(req) for f in parsed for req in f.requirements if _is_exact_pin(req)
+    ]
+    pins.extend(_to_req_str(req) for f in parsed for req in f.constraints)
+    options = list(dict.fromkeys(line for f in parsed for line in f.options))
 
-    dependencies: list[InstallRequirement] = []
-    for src_file in src_files:
-        dependencies.extend(_parse_requirements(repository, src_file))
-
-    compiler = BuildDependencyCompiler(repository)
+    compiler = BuildDependencyCompiler()
     try:
-        results = compiler.resolve(dependencies)
-        hashes = None
-        if generate_hashes and compiler.resolver is not None:
-            hashes = compiler.resolver.resolve_hashes(results)
-    except (PipToolsError, PyBuildDepsError) as e:
+        results = compiler.resolve(
+            requirements,
+            pins=pins,
+            options=options,
+            generate_hashes=generate_hashes,
+        )
+    except PyBuildDepsError as e:
         log.error(str(e))
         sys.exit(2)
 
+    compile_command = None
     if header:
-        pybuild_deps_cmd = get_compile_command(ctx)
-        os.environ.setdefault("CUSTOM_COMPILE_COMMAND", pybuild_deps_cmd)
-
-    writer = OutputWriter(
-        cast(BinaryIO, output_file),
-        click_ctx=ctx,
-        dry_run=dry_run,
-        emit_header=header,
-        emit_index_url=True,
-        emit_trusted_host=True,
+        compile_command = os.environ.get(
+            "CUSTOM_COMPILE_COMMAND"
+        ) or get_compile_command(ctx)
+    output = render(
+        results,
+        compile_command=compile_command,
+        options=options,
         annotate=annotate,
         annotation_style=annotation_style,
-        strip_extras=True,
         generate_hashes=generate_hashes,
-        default_index_url=repository.DEFAULT_INDEX_URL,
-        index_urls=repository.finder.index_urls,
-        trusted_hosts=repository.finder.trusted_hosts,
-        format_control=repository.finder.format_control,
-        linesep="\n",
-        allow_unsafe=True,
-        find_links=repository.finder.find_links,
-        emit_find_links=True,
-        emit_options=True,
     )
-
-    resolver = compiler.resolver
-    unsafe_packages = resolver.unsafe_packages if resolver is not None else set()
-    unsafe_requirements = resolver.unsafe_constraints if resolver is not None else set()
-
-    writer.write(
-        results=results,
-        unsafe_packages=unsafe_packages,
-        unsafe_requirements=unsafe_requirements,
-        markers={
-            key_from_ireq(ireq): ireq.markers for ireq in dependencies if ireq.markers
-        },
-        hashes=hashes,
-    )
-
+    if dry_run:
+        click.echo(output, err=True, nl=False)
     if dry_run:
         log.info("Dry-run, so no file created/updated.")
+    else:
+        _get_stream(output_file).write(output.encode())
 
 
-def _parse_requirements(repository, src_file):
+def _warn_pip_env() -> None:
+    for pip_var, uv_var in PIP_UV_ENV.items():
+        if os.environ.get(pip_var):
+            if os.environ.get(uv_var):
+                log.warning(f"Both {pip_var} and {uv_var} are set; using {uv_var}.")
+            else:
+                log.info(f"Using {pip_var} as {uv_var} for uv resolution.")
+    if os.environ.get("PIP_NO_INDEX", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        log.info("Using PIP_NO_INDEX as --no-index for uv resolution.")
+
+
+def _read_requirements(src_file: str) -> RequirementsFile:
     try:
-        return list(
-            parse_requirements(
-                src_file,
-                finder=repository.finder,
-                session=repository.session,
-                options=repository.options,
-            )
-        )
+        return read_requirements_file(src_file)
     except PyBuildDepsError as err:
         log.error(str(err))
         sys.exit(2)
+
+
+def _to_req_str(req: Requirement) -> str:
+    marker = f" ; {req.marker}" if req.marker else ""
+    if req.url:
+        return f"{req.name} @ {req.url}{marker}"
+    return f"{req.name}{req.specifier}{marker}"
+
+
+def _is_exact_pin(req: Requirement) -> bool:
+    specs = list(req.specifier)
+    return not req.url and len(specs) == 1 and specs[0].operator == "=="
+
+
+def _get_stream(output_file: LazyFile | IO[Any]) -> IO[bytes]:
+    if isinstance(output_file, LazyFile):
+        return output_file.open()
+    return output_file
 
 
 def _handle_src_files():
@@ -188,10 +222,3 @@ def _handle_src_files():
         )
 
     return src_files
-
-
-class OutputWriter(PipToolsWriter):
-    """pip-tools OutputWriter with customizations for pybuild-deps."""
-
-    def _sort_key(self, ireq: InstallRequirement) -> tuple[bool, str]:
-        return (not ireq.editable, f"{ireq.name}=={get_version(ireq)}")
