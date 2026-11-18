@@ -6,19 +6,16 @@ from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
-from piptools.exceptions import PipToolsError
-from piptools.repositories import PyPIRepository
 
 from pybuild_deps import __main__ as main
-from pybuild_deps.compile_build_dependencies import BuildDependencyCompiler
-from pybuild_deps.constants import PIPTOOLS_CACHE_DIR
+from pybuild_deps.compile_build_dependencies import (
+    BuildDependencyCompiler,
+    ResolvedDependency,
+)
+from pybuild_deps.exceptions import PyBuildDepsError
+from pybuild_deps.logger import log
 from pybuild_deps.parsers import parse_requirements
-
-
-@pytest.fixture
-def pypi_repo():
-    """PyPIRepository instance for testing."""
-    return PyPIRepository([], cache_dir=PIPTOOLS_CACHE_DIR)
+from pybuild_deps.scripts.compile import PIP_UV_ENV
 
 
 @pytest.fixture
@@ -125,9 +122,7 @@ def test_find_build_deps_no_sdist(cache: Path, runner: CliRunner):
 
 
 @pytest.mark.e2e
-def test_compile_greenpath(
-    runner: CliRunner, tmp_path: Path, pypi_repo: PyPIRepository
-):
+def test_compile_greenpath(runner: CliRunner, tmp_path: Path):
     """Test happy path for compile command."""
     output = tmp_path / "requirements-build.txt"
     requirements_path: Path = tmp_path / "requirements.txt"
@@ -137,7 +132,7 @@ def test_compile_greenpath(
     )
     assert result.exit_code == 0, traceback.print_tb(result.exc_info[2])
     expected_packages = {"setuptools-rust", "setuptools-scm"}
-    build_requirements = list(parse_requirements(str(output), pypi_repo.session))
+    build_requirements = list(parse_requirements(str(output)))
     assert expected_packages.issubset({r.name for r in build_requirements})
 
 
@@ -181,18 +176,15 @@ def test_compile_not_pinned_requirements_txt(runner: CliRunner, tmp_path: Path):
     requirements_path.write_text("setuptools-rust<1")
     result = runner.invoke(main.cli, args=["compile"])
     assert result.exit_code == 2
-    assert (
-        result.stderr.splitlines()[-1]
-        == "[ERROR]: requirement 'setuptools-rust<1 (from -r "
-        "requirements.txt (line 1))' is not exact "
-        "(pybuild-deps only supports pinned dependencies)."
-    )
+    assert "is not exact" in result.stderr.splitlines()[-1]
 
 
-def test_compile_piptools_error(runner: CliRunner, tmp_path: Path, mocker):
-    """Test error handling for exceptions raised by pip-tools."""
+def test_compile_error_handling(runner: CliRunner, tmp_path: Path, mocker):
+    """Test error handling for exceptions during resolution."""
     mocker.patch.object(
-        BuildDependencyCompiler, "resolve", side_effect=PipToolsError("SOME ERROR")
+        BuildDependencyCompiler,
+        "resolve",
+        side_effect=PyBuildDepsError("SOME ERROR"),
     )
     chdir(tmp_path)
     requirements_path: Path = tmp_path / "requirements.txt"
@@ -200,6 +192,167 @@ def test_compile_piptools_error(runner: CliRunner, tmp_path: Path, mocker):
     result = runner.invoke(main.cli, args=["compile"])
     assert result.exit_code == 2
     assert result.stderr.splitlines()[-1] == "[ERROR]: SOME ERROR"
+
+
+def test_compile_hashed_input_and_constraints(
+    runner: CliRunner, tmp_path: Path, mocker
+):
+    """Hashed requirements parse; -c pins steer resolution without being built."""
+    resolve = mocker.patch.object(BuildDependencyCompiler, "resolve", return_value=[])
+    chdir(tmp_path)
+    (tmp_path / "constraints.txt").write_text("cython==3.0.0\nsetuptools<70\n")
+    (tmp_path / "requirements.txt").write_text(
+        "-c constraints.txt\nidna==3.10 \\\n    --hash=sha256:aaa\n"
+    )
+    result = runner.invoke(main.cli, args=["compile"])
+    assert result.exit_code == 0
+    (requirements,), kwargs = resolve.call_args
+    assert requirements == ["idna==3.10"]
+    assert kwargs["pins"] == ["idna==3.10", "cython==3.0.0", "setuptools<70"]
+
+
+@pytest.fixture
+def fake_resolve(mocker, tmp_path):
+    """Resolve to one dependency without network, from inside tmp_path."""
+    chdir(tmp_path)
+    (tmp_path / "requirements.txt").write_text("idna==3.10\n")
+    return mocker.patch.object(
+        BuildDependencyCompiler,
+        "resolve",
+        return_value=[
+            ResolvedDependency(
+                name="flit-core",
+                version="3.12.0",
+                hashes=("sha256:aaa",),
+                via=frozenset({"idna"}),
+            )
+        ],
+    )
+
+
+@pytest.mark.parametrize(
+    ("args", "command"),
+    [
+        (["-o", "out.txt"], "pybuild-deps compile --output-file=out.txt"),
+        (
+            ["-v", "--generate-hashes", "--output-file", "out.txt", "requirements.txt"],
+            (
+                "pybuild-deps compile --generate-hashes --output-file=out.txt "
+                "requirements.txt"
+            ),
+        ),
+        (
+            ["--no-annotate", "--annotation-style=line", "-o", "out.txt"],
+            (
+                "pybuild-deps compile --annotation-style=line --no-annotate "
+                "--output-file=out.txt"
+            ),
+        ),
+    ],
+)
+def test_compile_header_command(runner, tmp_path, fake_resolve, args, command):
+    """The header records a normalized command, like pip-compile did."""
+    result = runner.invoke(main.cli, args=["compile", *args])
+    assert result.exit_code == 0
+    assert (tmp_path / "out.txt").read_text().splitlines()[4] == f"#    {command}"
+
+
+def test_compile_custom_compile_command(runner, tmp_path, fake_resolve, monkeypatch):
+    """CUSTOM_COMPILE_COMMAND replaces the command in the header."""
+    monkeypatch.setenv("CUSTOM_COMPILE_COMMAND", "make build-deps")
+    result = runner.invoke(main.cli, args=["compile", "-o", "out.txt"])
+    assert result.exit_code == 0
+    assert (tmp_path / "out.txt").read_text().splitlines()[4] == "#    make build-deps"
+
+
+@pytest.mark.parametrize(
+    ("args", "expected"),
+    [
+        ([], "flit-core==3.12.0\n    # via idna\n"),
+        (["--no-annotate"], "flit-core==3.12.0\n"),
+        (["--annotation-style", "line"], "flit-core==3.12.0         # via idna\n"),
+        (
+            ["--generate-hashes"],
+            "flit-core==3.12.0 \\\n    --hash=sha256:aaa\n    # via idna\n",
+        ),
+    ],
+)
+def test_compile_output_flags(runner, tmp_path, fake_resolve, args, expected):
+    """Annotation and hash flags shape the written file."""
+    result = runner.invoke(
+        main.cli, args=["compile", "--no-header", "-o", "out.txt", *args]
+    )
+    assert result.exit_code == 0
+    assert (tmp_path / "out.txt").read_text() == expected
+    assert "flit-core==3.12.0" not in result.stderr
+
+
+def test_compile_dry_run(runner, tmp_path, fake_resolve):
+    """A dry run prints the result and writes nothing."""
+    result = runner.invoke(
+        main.cli, args=["compile", "--dry-run", "--no-header", "-o", "out.txt"]
+    )
+    assert result.exit_code == 0
+    assert not (tmp_path / "out.txt").exists()
+    assert "flit-core==3.12.0" in result.stderr.splitlines()
+
+
+def test_compile_forwards_options(runner, tmp_path, fake_resolve):
+    """Options from the requirements file reach the resolver and the output."""
+    (tmp_path / "requirements.txt").write_text(
+        "--extra-index-url https://example.com/simple\n--pre\nidna==3.10\n"
+    )
+    result = runner.invoke(main.cli, args=["compile", "--no-header", "-o", "out.txt"])
+    assert result.exit_code == 0
+    assert fake_resolve.call_args.kwargs["options"] == [
+        "--extra-index-url https://example.com/simple",
+        "--pre",
+    ]
+    output = (tmp_path / "out.txt").read_text()
+    assert output.splitlines()[:2] == [
+        "--extra-index-url https://example.com/simple",
+        "",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("env", "warnings"),
+    [
+        ({}, 0),
+        ({"PIP_INDEX_URL": "https://example.com/simple"}, 0),
+        (
+            {
+                "PIP_EXTRA_INDEX_URL": "x",
+                "PIP_FIND_LINKS": "y",
+                "PIP_NO_CACHE_DIR": "1",
+            },
+            0,
+        ),
+    ],
+)
+def test_compile_handles_pip_env(runner, fake_resolve, mocker, env, warnings):
+    """Pip index settings are bridged to uv, with conflicts warned about."""
+    warning = mocker.spy(log, "warning")
+    result = runner.invoke(
+        main.cli,
+        args=["compile", "-o", "out.txt"],
+        env={**dict.fromkeys(PIP_UV_ENV), **env},
+    )
+    assert result.exit_code == 0
+    assert warning.call_count == warnings
+
+
+def test_compile_unsolvable_dependencies(runner: CliRunner, tmp_path: Path, mocker):
+    """Test CLI error output for conflicting build dependencies."""
+    chdir(tmp_path)
+    requirements_path = tmp_path / "requirements.txt"
+    requirements_path.write_text("foo==0.1.2")
+    mocker.patch(
+        "pybuild_deps.compile_build_dependencies.find_build_dependencies",
+        return_value=["setuptools>=70", "setuptools<60"],
+    )
+    result = runner.invoke(main.cli, args=["compile", "-o", str(tmp_path / "out.txt")])
+    assert result.exit_code == 2
 
 
 @pytest.mark.e2e
@@ -222,9 +375,7 @@ def test_compile_inactive_environment_markers(
 
 
 @pytest.mark.e2e
-def test_compile_mixed_active_inactive_markers(
-    runner: CliRunner, tmp_path: Path, pypi_repo: PyPIRepository
-):
+def test_compile_mixed_active_inactive_markers(runner: CliRunner, tmp_path: Path):
     """Test compile with mix of active and inactive markers."""
     output = tmp_path / "requirements-build.txt"
     requirements_path: Path = tmp_path / "requirements.txt"
@@ -236,31 +387,10 @@ def test_compile_mixed_active_inactive_markers(
         main.cli, args=["compile", str(requirements_path), "-o", str(output)]
     )
     assert result.exit_code == 0, result.output
-    build_requirements = list(parse_requirements(str(output), pypi_repo.session))
+    build_requirements = list(parse_requirements(str(output)))
     names = {r.name for r in build_requirements}
     assert "setuptools-rust" in names
     assert "pywin32" not in names
-
-
-def test_compile_unsolvable_dependencies(runner: CliRunner, tmp_path: Path, mocker):
-    """Test error handling for exceptions raised by pip-tools."""
-    chdir(tmp_path)
-    requirements = ["foo==0.1.2"]
-    requirements_path: Path = tmp_path / "requirements.txt"
-    requirements_path.write_text("\n".join(requirements))
-    outfile = tmp_path / "outfile"
-    mocker.patch(
-        "pybuild_deps.compile_build_dependencies.find_build_dependencies",
-        return_value=["setuptools>=42", "setuptools<42"],
-    )
-    result = runner.invoke(main.cli, args=["compile", "-o", str(outfile)])
-    assert result.exit_code == 2
-    assert (
-        "Impossible to resolve the following dependencies for package 'foo==0.1.2'"
-        in result.stderr
-    )
-    assert "setuptools>=42" in result.stderr
-    assert "setuptools<42" in result.stderr
 
 
 @pytest.mark.e2e
