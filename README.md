@@ -32,6 +32,7 @@ is required for reproducible builds.
 ## Features
 
 - find build dependencies for a given python package
+- list declared build dependencies for packages in a resolved requirements file
 - generate pinned build requirements from requirements.txt files.
 
 ## Installation
@@ -43,6 +44,18 @@ $ pip install pybuild-deps
 ```
 
 ## Usage
+
+List declared build dependencies for every package in a resolved requirements file:
+
+```console
+$ pybuild-deps list requirements.txt
+```
+
+Generate a JSON report with `--format json` and save it with `-o`:
+
+```console
+$ pybuild-deps list requirements.txt --format json -o build-deps.json
+```
 
 Please see the [Command-line Reference] for details.
 

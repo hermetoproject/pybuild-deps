@@ -17,6 +17,7 @@ def find_build_dependencies(
     package_name,
     version,
     raise_setuppy_parsing_exc=True,
+    raise_no_sdist_exc=False,
 ) -> list[str]:
     """Find build dependencies for a given package."""
     file_parser_map = {
@@ -28,6 +29,8 @@ def find_build_dependencies(
     try:
         source_path = get_package_source(package_name, version)
     except NoSDistError:
+        if raise_no_sdist_exc:
+            raise
         log.warning(
             f"No source distribution found for {package_name}=={version}, "
             "skipping (build requirements may be incomplete)"
