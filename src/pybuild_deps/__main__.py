@@ -9,6 +9,7 @@ from pybuild_deps.exceptions import PyBuildDepsError
 from .finder import find_build_dependencies
 from .logger import log
 from .scripts import compile
+from .scripts.list import list_build_deps
 
 
 @click.group()
@@ -37,6 +38,7 @@ def find_build_deps(package_name, package_version, verbose):
         click.echo(dep)
 
 
+cli.add_command(list_build_deps, "list")
 cli.add_command(compile.compile, "compile")
 
 if __name__ == "__main__":
